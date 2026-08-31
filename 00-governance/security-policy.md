@@ -22,11 +22,13 @@
 
 | Property | Required value |
 |----------|---------------|
-| Signing algorithm | RS256 (asymmetric) or HS256 with 256+ bit secret |
-| Access token expiration | 1 hour (`exp`) |
-| Refresh token expiration | 7 days |
-| Required claims | `sub` (userId), `iat`, `exp`, `jti` (unique token ID) |
-| Client storage | `httpOnly cookie` (web) or Keychain/Keystore (mobile) |
+| Signing algorithm | HS512 (HMAC-SHA, symmetric secret) — `JwtTokenProvider` uses `Keys.hmacShaKeyFor(jwtSecret.getBytes())`, which selects the HMAC algorithm from key length; the current secret (65 bytes / 520 bits) resolves to HS512. A shorter secret would silently downgrade to HS384/HS256 — keep any replacement secret at 64+ bytes |
+| Access token expiration | 24 hours (`expiration-ms: 86400000` in `application.yml`) |
+| Refresh token expiration | 7 days (`refresh-expiration-ms: 604800000` in `application.yml`) |
+| Required claims | `sub` (userId), `iat`, `exp`; role and `barbershop_id` are resolved server-side via `TenantContext`, not trusted from arbitrary claims |
+| Client storage | Mobile app (Expo/React Native) — Zustand-backed secure storage; no `httpOnly cookie` path exists yet, there is no web client in scope |
+
+> **Known gap (tracked, not yet closed):** the `JWT_SECRET` used locally is a placeholder value committed in `application.yml` for dev convenience (`CHANGE_THIS_SECRET_IN_PRODUCTION_...`). Migrating it to a secrets manager (AWS Secrets Manager / Railway secrets) is a documented pre-production blocker — see `01-context/scope.md` → External dependencies.
 
 **Prohibited in the payload:**
 - Passwords
@@ -35,10 +37,17 @@
 
 ### Refresh Token
 
+**Target policy (team commitment):**
 - Stored in the database (with bcrypt hash)
 - Mandatory rotation on each use (one refresh token = one use)
 - Invalidated on logout and on password change
 - ALL active tokens invalidated if use of a revoked token is detected
+
+> **Known gap (tracked, not yet closed):** the current implementation issues the refresh
+> token as a second, longer-lived stateless JWT (7-day expiration) — it is not yet persisted,
+> rotated, or revocable. A Redis-backed revocation list is a documented pre-production
+> blocker — see `01-context/scope.md` → External dependencies (`Token revocation list (Redis)
+> for logout invalidation`). Do not build features that assume revocation works today.
 
 ---
 
@@ -46,32 +55,31 @@
 
 ### RBAC (Role-Based Access Control)
 
-| Role | Description | Permissions |
+BarberSaaS has exactly four roles — no custom/extensible role model. Each controller
+endpoint is annotated `@PreAuthorize("hasRole('ROLE_NAME')")` (Spring Security method
+security, enabled via `@EnableMethodSecurity` in `SecurityConfig`); there is no separate
+`resource:action` permission table.
+
+| Role | Description | What it can do |
 |------|-------------|------------|
-| `SUPER_ADMIN` | System technical administrator | All |
-| `ADMIN` | Business administrator | [define] |
-| `OPERATOR` | Operator with write permissions | [define] |
-| `VIEWER` | Read-only | [define] |
-| `[CUSTOM_ROLE]` | [description] | [define] |
+| `SUPER_ADMIN` | Internal BarberSaaS platform team | Create/activate/suspend/cancel barbershop accounts, manage subscription plans, view platform-wide metrics (`SuperAdminDashboardController`, `SuperAdminBarbershopController`) |
+| `ADMIN_BARBERSHOP` | Barbershop owner | Manage employees, schedules, service catalog, finances, loyalty program, inventory for their own barbershop (`BarberServiceController`, `BarbershopDashboardController`, etc.) |
+| `BARBER` | Barbershop employee | View their daily agenda and upcoming appointments, grant loyalty stickers, register walk-in clients (`BarberStatsController`, appointment confirm/complete flows) |
+| `CLIENT` | Barbershop customer | Search barbershops, book/cancel/reschedule appointments, earn and redeem loyalty rewards (`AppointmentController` client-facing endpoints) |
 
-**Permission model:**
-
-```
-Permission: [resource]:[action]
-
-Examples:
-  orders:create
-  orders:read
-  orders:update
-  orders:delete
-  users:read
-  reports:export
-```
+**Two layers of authorization, both mandatory:**
+1. **Role check** — `@PreAuthorize("hasRole('X')")` on the controller: does this user's role
+   allow calling this endpoint at all?
+2. **Tenant check** — inside the service layer, every query is filtered by
+   `barbershop_id` resolved from `TenantContext` (populated from the JWT by
+   `JwtAuthenticationFilter`). A role check alone is **not** sufficient: an `ADMIN_BARBERSHOP`
+   passing the role check must still be blocked from reading or writing another barbershop's
+   data. See the multi-tenancy rule in each repo's `CLAUDE.md`.
 
 **Validation:**
-- The API Gateway validates the JWT (signature and expiration)
-- Each service validates the role permissions for the specific operation
-- Roles are included in the JWT as claim `roles: ["OPERATOR", "VIEWER"]`
+- `JwtAuthenticationFilter` validates the JWT (signature and expiration) on every request — there is no separate API Gateway; the Spring Boot app is the single deployable unit (ADR-002)
+- `@PreAuthorize` enforces the role check at the controller
+- The service layer enforces the tenant check via `TenantContext` — this is the check that actually protects cross-tenant data and must never be skipped
 
 ---
 
@@ -84,10 +92,17 @@ Examples:
 - Certificates: Let's Encrypt (staging) / Corporate CA (production)
 - HSTS enabled in production
 
-### Internal service-to-service communication
+### Internal module-to-module communication
 
-- mTLS for service-to-service communication in production (if possible with service mesh)
-- Bearer token or internal API key for services that do not support mTLS
+- Not applicable in the current architecture: BarberSaaS is a **modular monolith**
+  (ADR-002) — a single Spring Boot deployable unit. Bounded-context modules
+  (`auth`, `barbershop`, `appointment`, `loyalty`, `finance`, …) call each other via direct
+  in-process Java calls, not network requests, so there is no mTLS/API-key surface between
+  them today.
+- If a module is later extracted into its own service (see the trigger conditions in
+  `overview.md` and the extraction roadmap referenced by ADR-002), this section must be
+  revisited and a real service-to-service auth mechanism (mTLS or signed internal tokens)
+  defined before that extraction ships.
 
 ---
 
@@ -139,21 +154,19 @@ element.textContent = userProvidedContent;
 // or with library: DOMPurify.sanitize(userProvidedContent)
 ```
 
-### Validation with Zod / Joi
+### Validation with Jakarta Bean Validation (backend) / Zod (mobile, where applicable)
 
-```typescript
-// Explicit validation schema in the controller
-const CreateOrderSchema = z.object({
-  clientId: z.string().uuid(),
-  items: z.array(z.object({
-    productId: z.string().uuid(),
-    quantity: z.number().int().positive().max(1000),
-    price: z.object({
-      amount: z.number().positive(),
-      currency: z.enum(['COP', 'USD']),
-    }),
-  })).min(1).max(50),
-});
+```java
+// Explicit validation annotations on the request DTO — backend (Spring Boot)
+public record CreateAppointmentRequest(
+    @NotNull UUID barberId,
+    @NotNull UUID serviceId,
+    @NotNull @Future LocalDateTime startTime
+) {}
+
+// @Valid on the controller parameter triggers validation before the method body runs
+@PostMapping
+public ResponseEntity<AppointmentDto> create(@Valid @RequestBody CreateAppointmentRequest request) { ... }
 ```
 
 ---
@@ -162,7 +175,7 @@ const CreateOrderSchema = z.object({
 
 | Vulnerability | Implemented control |
 |---------------|-------------------|
-| A01: Broken Access Control | RBAC + permission validation in each service |
+| A01: Broken Access Control | `@PreAuthorize("hasRole(...)")` per endpoint + mandatory `barbershop_id` tenant filtering via `TenantContext` in the service layer |
 | A02: Cryptographic Failures | TLS 1.2+, bcrypt for passwords, secrets in vault |
 | A03: Injection | Prepared parameters in SQL, schema validation |
 | A04: Insecure Design | Threat modeling in design, Security review |
@@ -230,4 +243,5 @@ const SECURITY_EVENTS = [
 - Security non-functional requirements → `04-requirements/non-functional.md`
 - ADR on authentication → `05-architecture/decisions/`
 - Security event observability → `13-operations/observability.md`
-- RBAC implemented in → `09-microservices/services/XX-auth-service/`
+- RBAC and JWT implemented in → `com.barbersaas.auth` and `com.barbersaas.security` (backend), see `05-architecture/hexagonal-architecture.md` for the module boundary rules
+- Multi-tenancy rule (`TenantContext`, `barbershop_id`) → each repo's `CLAUDE.md`, "Producto: BarberSaaS" section

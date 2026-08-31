@@ -43,11 +43,11 @@ the Aggregate Root and are validated on every operation.
 
 | Attribute | Type | Description | Required | Rules |
 |-----------|------|-------------|---------|-------|
-| id | UUID | Unique identifier | Yes | Auto-generated on creation |
-| barbershopId | UUID | Owning tenant | Yes | Immutable after creation; enforced by `TenantContext` |
-| clientId | UUID | Client the appointment belongs to | Yes (nullable for walk-ins) | Nullable when created as a walk-in by an admin |
-| barberId | UUID | Barber assigned to the appointment | Yes | Must belong to the same `barbershopId` |
-| serviceId | UUID | Service being performed | Yes | Must belong to the same `barbershopId`'s service catalog |
+| id | Long | Unique identifier | Yes | Auto-generated on creation (`@GeneratedValue(strategy = IDENTITY)`) |
+| barbershopId | Long | Owning tenant (FK) | Yes | Immutable after creation; enforced by `TenantContext` |
+| clientId | Long | Client the appointment belongs to (FK) | Yes (nullable for walk-ins) | Nullable when created as a walk-in by an admin |
+| barberId | Long | Barber assigned to the appointment (FK) | Yes | Must belong to the same `barbershopId` |
+| serviceId | Long | Service being performed (FK) | Yes | Must belong to the same `barbershopId`'s service catalog |
 | date | Date | Appointment date | Yes | Must not be in the past at creation time |
 | startTime / endTime | Time | Time slot (VO: `TimeSlot`) | Yes | `endTime` derived from service duration; must not overlap another appointment for the same barber |
 | status | Enum | PENDING / CONFIRMED / IN_PROGRESS / COMPLETED / CANCELLED / NO_SHOW | Yes | Only valid transitions allowed (see state machine) |
@@ -159,12 +159,12 @@ class Appointment {
 
 | Attribute | Type | Description | Required | Rules |
 |-----------|------|-------------|---------|-------|
-| id | UUID | Unique identifier, used as `barbershop_id` tenant key | Yes | Auto-generated on creation |
+| id | Long | Unique identifier, used as `barbershop_id` tenant key | Yes | Auto-generated on creation (`@GeneratedValue(strategy = IDENTITY)`) |
 | name | String | Barbershop's display name | Yes | Non-empty |
 | city | String | City where the barbershop operates | Yes | Used in client search |
 | status | Enum | TRIAL / ACTIVE / SUSPENDED / CANCELLED | Yes | Managed by Super Admin (except TRIAL, set at registration) |
 | trialEndsAt | DateTime | End of the 60-day free trial | Yes | Set to `createdAt + 60 days` at registration; immutable |
-| subscriptionPlanId | UUID | Currently assigned plan | Yes | Must reference an `isActive` `SubscriptionPlan` |
+| subscriptionPlanId | Long | Currently assigned plan (FK) | Yes | Must reference an `isActive` `SubscriptionPlan` |
 | cancellationPolicyHours | Integer | Hours before an appointment that a client can still cancel | No | Configured by the admin; defaults if unset |
 | createdAt | DateTime | Registration date | Yes | Immutable |
 | updatedAt | DateTime | Last modification | Yes | Updated automatically |
@@ -220,9 +220,9 @@ INV-SHOP-003: Plan must be active
 
 | Attribute | Type | Description | Required | Rules |
 |-----------|------|-------------|---------|-------|
-| id | UUID | Unique identifier | Yes | Auto-generated on creation |
-| clientId | UUID | Owning client | Yes | Immutable |
-| barbershopId | UUID | Tenant scope | Yes | Immutable; a client has one card per barbershop |
+| id | Long | Unique identifier | Yes | Auto-generated on creation (`@GeneratedValue(strategy = IDENTITY)`) |
+| clientId | Long | Owning client (FK) | Yes | Immutable |
+| barbershopId | Long | Tenant scope (FK) | Yes | Immutable; a client has one card per barbershop |
 | stickersCount | Integer | Current sticker count | Yes | ≥ 0; reset to 0 (or decremented) on redemption |
 | totalRewardsRedeemed | Integer | Historical count of redemptions | Yes | Only increments |
 

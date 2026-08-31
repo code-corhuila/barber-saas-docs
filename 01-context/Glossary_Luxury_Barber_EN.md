@@ -1,4 +1,4 @@
-# Project Glossary — Luxury Barber
+# Project Glossary — BarberSaaS
 
 > **Instructions:** Define here all technical and business terms used in the project.
 > This is the official dictionary — if there is ambiguity, this document wins.
@@ -18,13 +18,20 @@
 
 | Term | Definition | Notes / Synonyms |
 |---------|------------|------------------|
-| **Appointment (or Booking)** | Assignment of a service to a customer, attended by a specific barber on a given date and time. | *Synonyms to AVOID: Turn, Event, Slot.* |
-| **Appointment Status** | Phase of the lifecycle in which a booking currently is (e.g., Pending payment, Confirmed, Completed, Canceled). | |
-| **Barber** | Internal user (employee) enabled to execute services and who only has access to manage their own daily schedule. | *Synonyms to AVOID: Stylist, Hairdresser.* |
-| **Receptionist** | Internal user who manages appointments and physical payments at the front desk, without access to configuration or reports. | |
-| **Administrator** | User with full access to manage the system: users, services, prices, inventory, and financial reports. | |
-| **Service Catalog** | List of available options to book (e.g., Haircut, Beard, Classic shave), including price, duration, and trained barbers. | |
-| **Luxury Barber** | Fictional barbershop conceived as a business case for the academic project. | |
+| **Barbershop** | A registered business tenant on the platform — the unit of data isolation (`barbershop_id`). Has its own status, subscription plan, staff, and service catalog. | *Synonyms:* shop, tenant |
+| **Appointment (or Booking)** | A scheduled service between a client and a specific barber, at a specific barbershop, date, and time slot. | *Synonyms to AVOID: Turn, Event.* "Slot" has a distinct technical meaning — see below |
+| **Appointment Status** | Phase of an appointment's lifecycle: `PENDING` → `CONFIRMED` → `IN_PROGRESS` → `COMPLETED`, or `CANCELLED` / `NO_SHOW`. | Full state machine documented in `02-domain/entities-and-rules.md` |
+| **Client** | A platform user with role `CLIENT`. Searches barbershops, books/cancels/reschedules appointments, earns and redeems loyalty rewards. | |
+| **Barber** | An employee user with role `BARBER`. Checks their daily agenda, performs services, grants loyalty stickers, registers walk-in clients. | *Synonyms to AVOID: Stylist, Hairdresser* |
+| **Admin (Barbershop Admin)** | The owner of a barbershop, role `ADMIN_BARBERSHOP`. Manages employees, schedules, service catalog, finances, loyalty program, and inventory for their own shop only. | *Synonym: shop owner* |
+| **Super Admin** | Internal BarberSaaS platform team member, role `SUPER_ADMIN`. Creates barbershop accounts, manages subscription plans, activates/suspends/cancels accounts, monitors platform-wide metrics. | Operates across all tenants — the only role not scoped to one barbershop |
+| **Walk-in** | An appointment created by an admin directly on a barber's agenda for a client who arrived without a prior booking, without requiring that client to register an account. | Marked "in progress" in `01-context/scope.md` |
+| **Service Catalog** | The list of services a barbershop offers (name, price, duration), configured per barbershop by its admin. | Entity: `BarberService` |
+| **Loyalty Card** | A client's accumulated sticker count and redemption history at one specific barbershop. | One card per client per barbershop |
+| **Sticker** | A loyalty point granted by a barber or admin after a completed service. | |
+| **Reward / Reward Coupon** | The benefit a client earns after accumulating the stickers required by their barbershop. Redemption issues an `ACTIVE` Reward Coupon, applied as a 100% discount on the client's next booking. | |
+| **Subscription Plan** | One of three paid tiers a barbershop is on — **Starter** (up to 2 barbers), **Profesional** (up to 5), **Premium** (unlimited) — differing in monthly COP price and max barbers. | See `01-context/overview_en.md` → Monetization model |
+| **Trial** | The 60-day free period a barbershop gets at self-registration before it must convert to a paid plan. | Status `TRIAL` in the barbershop lifecycle (`TRIAL` → `ACTIVE` → `SUSPENDED` → `CANCELLED`) |
 
 ---
 
@@ -32,18 +39,13 @@
 
 | Term | Definition |
 |---------|------------|
-| **Microservice** | Independent service with a single responsibility, its own process, and its own database. In this project: Auth/User, Appointment, Payment, and Notification. |
-| **Database per Service** | Pattern where each microservice exclusively manages its own database (MongoDB). External relationships are handled by referential IDs, never by direct joins. |
-| **Domain Event** | Immutable fact that occurred in the business and that other services can observe (e.g., `AppointmentCreated`). Its name is always in the past tense. |
-| **Event Choreography** | Implementation of the Saga pattern where each service reacts to events autonomously (via RabbitMQ) without a central coordinator. |
-| **Bounded Context** | Boundary within which a particular domain model has consistent meaning (e.g., the "Payments" context vs. the "Appointments" context). |
-| **Eventual Consistency** | Guarantee that, after a change (e.g., a successful payment), all services will update their databases to be consistent within a maximum of 5 seconds. |
-| **Service Discovery** | Tool (Eureka) that allows dynamic registration of instances, avoiding hardcoding IPs in the source code. |
-| **API Gateway** | Single HTTP entry point to the system that routes REST requests from clients to the corresponding microservices. |
-| **Circuit Breaker** | Fault tolerance pattern (Resilience4j) that stops calls to a failing service (e.g., Notification Service) to prevent cascading blocks. |
-| **Saga** | Sequence of distributed transactions across different microservices, with compensating actions in case of failure (e.g., reverting appointment status if payment fails). |
-| **Dead Letter Queue (DLQ)** | Queue in RabbitMQ where messages/events that could not be processed after exceeding the retry limit (3 attempts) are sent. |
-| **Idempotency** | Property guaranteeing that processing the same event multiple times (using its unique `eventId`) will not generate duplicated side effects, such as double charging. |
+| **Modular Monolith** | The backend's chosen architecture (**ADR-002**): a single Spring Boot 3 / Java 21 deployable unit, internally organized into bounded-context packages (`auth`, `barbershop`, `appointment`, `schedule`, `loyalty`, `finance`, `inventory`, `notification`, `plan`, `dashboard`), with no direct cross-context repository access. Chosen over microservices-from-day-one given the 1-developer team size and current load. |
+| **Bounded Context** | A boundary within which a domain model has one consistent meaning — e.g., "Barber" means an `Employee` in the Barbershop Management context but a `BarberProfile` performing the service in the Appointment context. Full map in `02-domain/domain-map.md`. |
+| **Multi-tenancy** | The isolation model that keeps one barbershop's data invisible to another: a `barbershop_id` discriminator column on every tenant-scoped table, enforced in the service layer — **not** a separate database or schema per tenant. |
+| **TenantContext** | A `ThreadLocal` populated from the JWT by `JwtAuthenticationFilter` on every request, holding `userId`, `barbershopId`, and `role` for the duration of that request. The mechanism every query relies on to enforce multi-tenancy. |
+| **RBAC** | Role-Based Access Control, enforced via Spring Security `@PreAuthorize("hasRole(...)")` at the controller layer. BarberSaaS has exactly 4 fixed roles (`SUPER_ADMIN`, `ADMIN_BARBERSHOP`, `BARBER`, `CLIENT`) — no custom or extensible permission model. |
+| **Aggregate / Entity / Value Object** | DDD tactical building blocks used to describe the domain model (e.g., `Appointment` and `LoyaltyCard` as aggregate roots, `Money` and `TimeSlot` as value objects). Full breakdown in `02-domain/entities-and-rules.md`. |
+| **Extraction trigger** | A documented, measurable condition (e.g., a module's p95 latency or a barbershop-count threshold) that would justify pulling a bounded-context module out of the monolith into its own service later. Referenced in **ADR-002**; the modular structure exists specifically to keep this path open. |
 
 ---
 
@@ -51,16 +53,17 @@
 
 | Acronym | Meaning |
 |----------|-------------|
-| **PDR** | Product/Project Design Requirements |
+| **PRD** | Product Requirements Document — the BarberSaaS PRD v1.0 (August 2026) is the source document cited throughout `01-context`, `02-domain`, and `05-architecture` |
 | **MVP** | Minimum Viable Product |
 | **RBAC** | Role-Based Access Control |
 | **SaaS** | Software as a Service |
-| **AMQP** | Advanced Message Queuing Protocol (Protocol used by RabbitMQ) |
-| **JWT** | JSON Web Token (Used for authentication) |
+| **JWT** | JSON Web Token (used for authentication — see `00-governance/security-policy.md`) |
+| **FCM** | Firebase Cloud Messaging — push notification delivery to the mobile app |
 | **API** | Application Programming Interface |
 | **CRUD** | Create, Read, Update, Delete |
 | **DTO** | Data Transfer Object |
-| **FR** | Functional Requirement (translated from RF) |
-| **NFR** | Non-Functional Requirement (translated from RNF) |
+| **FR** | Functional Requirement |
+| **NFR** | Non-Functional Requirement |
 | **CI/CD** | Continuous Integration / Continuous Delivery |
 | **PR** | Pull Request |
+| **COP** | Colombian Peso — the only currency supported in the MVP (see `Money` value object, `02-domain/entities-and-rules.md`) |

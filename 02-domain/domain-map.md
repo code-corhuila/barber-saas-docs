@@ -1,186 +1,302 @@
 # Domain Map — Bounded Contexts
 
-> **What to fill in here:** The domain map is the central DDD (Domain-Driven Design) artifact.
-> It defines the system's boundaries and how they relate to each other.
-> Build it first with the team and domain experts in an Event Storming session.
-
-## Before filling in this document: Event Storming
-
-**Event Storming** is a collaborative workshop for modeling the domain before writing code.
-It lasts 2–4 hours with the whole team (dev + PO + business expert).
-
-**Materials:** Long wall, 4-color sticky notes, markers.
-
-**Standard colors:**
-| Color | Represents | Example |
-|-------|-----------|---------|
-| 🟠 Orange | **Domain events** (something that happened, past tense) | `AppointmentScheduled`, `PaymentReceived` |
-| 🔵 Blue | **Commands** (action that triggers the event) | `ScheduleAppointment`, `ProcessPayment` |
-| 🟡 Yellow | **Actors** (who executes the command) | `Patient`, `Doctor`, `Admin` |
-| 🩷 Pink | **External systems** or integration points | `Payment Gateway`, `Email SMTP` |
-
-**Session steps:**
-1. (30 min) Post all events that occur in the business, in chronological order, on the wall
-2. (30 min) Identify which command or actor triggers each event
-3. (45 min) Group related events — each group is a candidate Bounded Context
-4. (30 min) Draw relationships between Bounded Contexts (who depends on whom)
-5. (30 min) Discuss the resulting map and agree on names
-
-**Result:** The session output directly feeds the 3 documents in `02-domain/`:
-- Identified events → `domain-events.md`
-- Entities and their rules → `entities-and-rules.md`
-- Bounded Contexts and their map → this document
+> **BarberSaaS** · v1.0 · August 2026
+> Built with Event Storming sessions and validated against the working implementation.
 
 ---
 
----
+## 1. Business Domain Overview
 
-## 1. Domain overview
-
-> One paragraph of context about the business and what problem the system solves.
-> Write it without technical terms — it must be readable by a business expert.
-
-```
-[Describe the business domain here. E.g.: "The system manages the complete cycle of
-[X] reservations, from the customer's request through to confirmation and billing."]
-```
+BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational cycle of barbershops in Colombia. The system covers every stage of a barbershop's day-to-day business: a client discovers and books an appointment with a specific barber, the barber manages their daily agenda and marks services as completed, the shop owner tracks revenue, controls staff schedules, and runs a loyalty program to retain clients. A platform administrator oversees all registered barbershops, manages subscription plans, and controls trial and billing cycles. Every barbershop operates in complete isolation — one shop can never see the data of another.
 
 ---
 
-## 2. Identified Bounded Contexts
+## 2. Bounded Contexts
 
-A **Bounded Context** is the explicit boundary within which a particular domain model
-has consistent meaning. Each bounded context has its own Ubiquitous Language.
+---
 
-> **Signs of a good bounded context:**
-> - Has a clear responsible team
-> - Has its own database
-> - Can be deployed independently
-> - The same term in two different contexts can mean different things
-
-### Bounded Context: [Name — e.g.: User Management]
+### Bounded Context: Identity & Auth
 
 | Field | Value |
-|-------|-------|
-| **Name** | [ContextName] |
-| **Responsibility** | [What this context captures in one sentence] |
-| **Owning team** | [Responsible team or person] |
-| **Microservice(s)** | [service-name, service2-name] |
-| **Database** | [PostgreSQL / MongoDB / Redis / etc.] |
-| **Ubiquitous Language** | [Key business terms in this context] |
+|---|---|
+| **Name** | Identity & Auth |
+| **Responsibility** | Registration, login, JWT issuance, tenant resolution, and password recovery for all user roles |
+| **Owner** | Carlos Leal (backend: `com.barbersaas.auth`) |
+| **Module** | `auth` (part of the modular monolith — not a separate service in MVP) |
+| **Database** | PostgreSQL — tables: `users`, `password_reset_tokens` |
+| **Ubiquitous language** | User, Role, JWT, TenantContext, PasswordResetToken |
 
-**Context-specific terms (Ubiquitous Language):**
+**Terms in this context:**
 
 | Term | Meaning in THIS context | Different in another context? |
-|------|------------------------|-------------------------------|
-| [User] | [Person with an active account] | [Yes — in Billing it's "Client"] |
-| [Account] | [Set of credentials] | [No] |
+|---|---|---|
+| **User** | Any authenticated person with a role and an account | Yes — in Appointment it becomes `client`, `barber` |
+| **Role** | `CLIENT`, `BARBER`, `ADMIN_BARBERSHOP`, `SUPER_ADMIN` | No — role is a platform-wide concept |
+| **TenantContext** | ThreadLocal store of `userId`, `barbershopId`, `role` for the current HTTP request | No |
+| **Token** | A signed JWT containing claims: `userId`, `role`, `barbershopId` | Yes — in Loyalty, `token` is a 6-digit password reset code |
 
 ---
 
-### Bounded Context: [Name — e.g.: Order Management]
+### Bounded Context: Barbershop Management
 
 | Field | Value |
-|-------|-------|
-| **Name** | [ContextName] |
-| **Responsibility** | |
-| **Owning team** | |
-| **Microservice(s)** | |
-| **Database** | |
-| **Ubiquitous Language** | |
+|---|---|
+| **Name** | Barbershop Management |
+| **Responsibility** | Lifecycle of a barbershop tenant: creation, plan assignment, trial management, status transitions (TRIAL → ACTIVE → SUSPENDED → CANCELLED), and employee (barber) administration |
+| **Owner** | Carlos Leal (backend: `com.barbersaas.barbershop`, `com.barbersaas.employee`) |
+| **Module** | `barbershop` + `employee` (modular monolith) |
+| **Database** | PostgreSQL — tables: `barbershops`, `users` (ADMIN_BARBERSHOP / BARBER roles), `barber_profiles`, `subscription_plans` |
+| **Ubiquitous language** | Barbershop, SubscriptionPlan, BarberProfile, BarbershopStatus, TrialPeriod |
+
+**Terms in this context:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|---|---|---|
+| **Barbershop** | A registered business tenant with its own plan, status, and data scope | Yes — in Appointment it is just the `barbershopId` FK |
+| **Employee** | A `BARBER` or `ADMIN_BARBERSHOP` user belonging to a barbershop | Yes — in Appointment it is called `barber` |
+| **BarberProfile** | Extended profile of a barber: bio, photo, linked to a `User` | No |
+| **Plan** | A `SubscriptionPlan` with price (COP), max barbers, and features | Yes — in Super Admin it is managed; in Barbershop it is consumed |
+| **Trial** | A 60-day free period starting at `created_at`, tracked via `trial_ends_at` | No |
+
+---
+
+### Bounded Context: Appointment
+
+| Field | Value |
+|---|---|
+| **Name** | Appointment |
+| **Responsibility** | The complete lifecycle of a service booking: availability calculation, anti-double-booking, state machine (PENDING → CONFIRMED → IN_PROGRESS → COMPLETED / CANCELLED / NO_SHOW), rescheduling, and walk-in client tracking |
+| **Owner** | Carlos Leal (backend: `com.barbersaas.appointment`) |
+| **Module** | `appointment` (modular monolith) |
+| **Database** | PostgreSQL — tables: `appointments`, `barber_services`, `barber_schedules`, `schedule_exceptions` |
+| **Ubiquitous language** | Appointment, AppointmentStatus, Slot, AvailabilityWindow, CancellationPolicy, WalkIn |
+
+**Terms in this context:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|---|---|---|
+| **Appointment** | A confirmed time slot between a client and a barber for a specific service | No |
+| **Slot** | A computed available time window for a barber on a given date | No |
+| **Client** | A `User` with role `CLIENT` who books the appointment | Yes — in Identity it is just a `User` |
+| **Barber** | A `BarberProfile` who performs the service | Yes — in Barbershop Management it is an `Employee` |
+| **WalkIn** | An appointment created by the admin for a client who arrived without prior booking, tracked without requiring client registration | No |
+| **CancellationPolicy** | Number of hours before the appointment within which cancellation is allowed (configurable per barbershop) | No |
+| **PriceAtBooking** | The service price captured at reservation time — may be `0` if a reward coupon is applied | Yes — in Loyalty it becomes the coupon redemption signal |
+
+---
+
+### Bounded Context: Schedule
+
+| Field | Value |
+|---|---|
+| **Name** | Schedule |
+| **Responsibility** | Definition and management of a barber's recurring weekly working hours and one-off exceptions (days off, modified hours). Input to the availability algorithm in Appointment. |
+| **Owner** | Carlos Leal (backend: `com.barbersaas.schedule`) |
+| **Module** | `schedule` (modular monolith) |
+| **Database** | PostgreSQL — tables: `barber_schedules`, `schedule_exceptions` |
+| **Ubiquitous language** | WeeklySchedule, DayOfWeek, TimeSlot, ScheduleException, DayOff |
+
+**Terms in this context:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|---|---|---|
+| **Schedule** | A barber's recurring availability definition (day + start/end times) | No |
+| **ScheduleException** | A date where the barber deviates from the regular schedule (full day off or modified hours) | No |
+
+---
+
+### Bounded Context: Loyalty & Rewards
+
+| Field | Value |
+|---|---|
+| **Name** | Loyalty & Rewards |
+| **Responsibility** | Sticker-based loyalty card per client per barbershop, reward redemption, automatic coupon generation and application on the client's next booking |
+| **Owner** | Carlos Leal (backend: `com.barbersaas.loyalty`) |
+| **Module** | `loyalty` (modular monolith) |
+| **Database** | PostgreSQL — tables: `loyalty_cards`, `loyalty_rewards_config`, `loyalty_transactions`, `reward_coupons` |
+| **Ubiquitous language** | LoyaltyCard, Sticker, Reward, Redemption, RewardCoupon, CouponStatus |
+
+**Terms in this context:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|---|---|---|
+| **Sticker** | A loyalty point granted by a barber or admin after a completed service | No |
+| **LoyaltyCard** | A client's sticker count and redemption history within a specific barbershop | No |
+| **Reward** | The benefit a client earns after accumulating the required stickers (defined by the barbershop) | No |
+| **RewardCoupon** | An `ACTIVE` coupon generated on redemption — automatically applied as a 100% discount on the client's next booking | No |
+| **Redemption** | The act of exchanging accumulated stickers for a reward, which creates a `RewardCoupon` | No |
+
+---
+
+### Bounded Context: Notifications
+
+| Field | Value |
+|---|---|
+| **Name** | Notifications |
+| **Responsibility** | Delivery of in-app, push (FCM), and email notifications triggered by domain events. Persists all notifications to DB regardless of delivery outcome (graceful degradation). |
+| **Owner** | Carlos Leal (backend: `com.barbersaas.notification`) |
+| **Module** | `notification` (modular monolith) |
+| **Database** | PostgreSQL — tables: `notifications`, `device_tokens` |
+| **Ubiquitous language** | Notification, NotificationType, DeviceToken, PushDelivery, EmailDelivery |
+
+**Terms in this context:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|---|---|---|
+| **Notification** | A persisted in-app message (title, body, type, read status) for a specific user | No |
+| **DeviceToken** | The FCM registration token for a user's Android or iOS device | No |
+| **PushDelivery** | An attempt to send a push notification via Firebase Admin SDK — may fail without blocking the triggering operation | No |
+
+---
+
+### Bounded Context: Finance & Inventory
+
+| Field | Value |
+|---|---|
+| **Name** | Finance & Inventory |
+| **Responsibility** | Manual recording of income and expenses per barbershop, product stock management, and restock alerts |
+| **Owner** | Carlos Leal (backend: `com.barbersaas.finance`, `com.barbersaas.inventory`) |
+| **Module** | `finance` + `inventory` (modular monolith) |
+| **Database** | PostgreSQL — tables: `finance_records`, `inventory_products`, `inventory_movements` |
+| **Ubiquitous language** | FinanceRecord, RecordType (INCOME/EXPENSE), InventoryProduct, StockAlert, Movement |
+
+**Terms in this context:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|---|---|---|
+| **FinanceRecord** | A manually registered income or expense entry with amount, date, and description | No |
+| **RecordType** | `INCOME` or `EXPENSE` — determines the financial sign of the record | No |
+| **InventoryProduct** | A physical product tracked by quantity (e.g., hair gel, clippers) | No |
+| **StockAlert** | Triggered when `currentStock <= minStockAlert` for a product | No |
+
+---
+
+### Bounded Context: Platform Administration (Super Admin)
+
+| Field | Value |
+|---|---|
+| **Name** | Platform Administration |
+| **Responsibility** | Cross-tenant oversight: creating and managing barbershops, defining subscription plans, monitoring platform-wide metrics (total barbershops, clients, revenue), and managing trial/billing states |
+| **Owner** | Carlos Leal (backend: `com.barbersaas.barbershop.SuperAdminBarbershopController`, `com.barbersaas.plan`) |
+| **Module** | Part of `barbershop` + `plan` (modular monolith, accessed via `/api/super-admin/**`) |
+| **Database** | PostgreSQL — reads across all tenant tables; owns `subscription_plans` |
+| **Ubiquitous language** | PlatformDashboard, SubscriptionPlan, BarbershopStatus, TrialExpiry |
+
+**Terms in this context:**
+
+| Term | Meaning in THIS context | Different in another context? |
+|---|---|---|
+| **Platform** | The entire BarberSaaS system viewed as a product sold to barbershop owners | No |
+| **Plan** | A `SubscriptionPlan` with price (COP/month), max barbers, and features — managed by Super Admin | Yes — in Barbershop Management it is an assigned contract |
+| **Suspension** | Setting a barbershop's `status` to `SUSPENDED`, blocking all operations for that tenant | No |
 
 ---
 
 ## 3. Context Map
 
-The Context Map shows relationships between bounded contexts. Relationships define
-how contexts communicate and who holds the "power" in the integration.
-
 ```
-┌─────────────────────┐        ┌──────────────────────┐
-│  [Context A]        │        │  [Context B]         │
-│                     │──────▶│                      │
-│  Domain:            │  D→C  │  Domain:             │
-│  [responsibility]   │       │  [responsibility]    │
-└─────────────────────┘       └──────────────────────┘
-                                        │
-                               D→C      │
-                                        ▼
-                              ┌──────────────────────┐
-                              │  [Context C]         │
-                              │                      │
-                              │  [responsibility]    │
-                              └──────────────────────┘
+┌─────────────────────────┐
+│   Identity & Auth       │  ← Upstream to ALL contexts
+│   /api/auth/**          │    (JWT + TenantContext resolve
+│   Role, JWT, Tenant     │     userId, barbershopId, role)
+└────────────┬────────────┘
+             │ U → D (JWT claims)
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                    Barbershop Management                           │
+│   /api/admin/** · /api/super-admin/**                              │
+│   Barbershop, BarberProfile, SubscriptionPlan, BarbershopStatus    │
+└──────┬──────────────────────────┬──────────────────────────────────┘
+       │ U → D (barbershopId FK)  │ U → D (barberProfileId FK)
+       ▼                          ▼
+┌──────────────────┐    ┌──────────────────────────┐
+│    Schedule      │    │       Appointment        │
+│  barber_schedules│───▶│  availability algorithm  │
+│  exceptions      │ SK │  state machine (6 states)│
+└──────────────────┘    │  walk-in support         │
+                        └──────────┬───────────────┘
+                                   │ U → D (planned — grantSticker() is a manual
+                                   │ staff action today, not auto-triggered; see
+                                   │ relationship table below)
+                        ┌──────────▼───────────────┐
+                        │    Loyalty & Rewards      │
+                        │  stickers, coupons        │
+                        │  RewardCoupon hooks       │
+                        │  back into Appointment    │
+                        │  (priceAtBooking = 0)     │
+                        └──────────┬───────────────┘
+                                   │
+                    ┌──────────────┼──────────────┐
+                    ▼              ▼              ▼
+            ┌──────────┐  ┌──────────────┐  ┌──────────────────┐
+            │Notifica- │  │  Finance &   │  │    Platform      │
+            │tions     │  │  Inventory   │  │  Administration  │
+            │FCM+email │  │  COP records │  │  Super Admin     │
+            │in-app    │  │  stock alerts│  │  cross-tenant    │
+            └──────────┘  └──────────────┘  └──────────────────┘
 ```
 
-### Context relationship types
+### Relationship table
 
-| Type | Symbol | Description | Example |
-|------|--------|-------------|---------|
-| **Upstream → Downstream** | `U → D` | U provides, D consumes. D depends on U. | Auth → Orders |
-| **Shared Kernel** | `SK` | Two teams share part of the model | Shared User ID |
-| **Customer/Supplier** | `C/S` | Supplier (U) negotiates with Customer (D) | Inventory → Sales |
-| **Conformist** | `CONF` | D adopts U's model without negotiating | Legacy integration |
-| **Anti-Corruption Layer** | `ACL` | D translates U's model to protect itself | Gateway → External API |
-| **Open Host Service** | `OHS` | U publishes a published protocol | Event Bus, REST API |
-| **Published Language** | `PL` | Explicit shared language | OpenAPI spec, events |
-
-### Relationships table
-
-| Context A | Relationship | Context B | Communication channel | Contract |
-|-----------|-------------|-----------|----------------------|---------|
-| [Context A] | U → D | [Context B] | REST / Event | OpenAPI / AsyncAPI |
-| [Context B] | ACL | [Context C] | Adapter | Internal interface |
+| Context A | Relation | Context B | Channel | Contract |
+|---|---|---|---|---|
+| Identity & Auth | U → D | All other contexts | JWT (HTTP header) | `TenantContext` (ThreadLocal) |
+| Barbershop Management | U → D | Appointment | `barbershopId` FK in `appointments` | JPA entity reference |
+| Barbershop Management | U → D | Schedule | `barberProfileId` FK in `barber_schedules` | JPA entity reference |
+| Schedule | Shared Kernel | Appointment | Shared `barber_schedules` / `schedule_exceptions` tables | JPA — same PostgreSQL schema |
+| Appointment | U → D (target design, not yet wired) | Loyalty & Rewards | `grantSticker()` — **not actually called automatically on COMPLETED as of this review.** `AppointmentService.complete()` only changes status; sticker granting requires a separate explicit call to `POST /api/loyalty/grant-sticker` by staff. See `02-domain/domain-events.md` → `AppointmentCompleted` drift note | In-process Java method call (manual trigger today, not event-driven) |
+| Loyalty & Rewards | U → D | Appointment | `RewardCoupon` check in `AppointmentService.create()` — confirmed in code | In-process Java method call |
+| Appointment | U → D | Notifications | `NotificationService.notify()` after `create()`, `confirm()`, `cancel()`, and the daily reminder job — confirmed in code. **Not** called after `complete()` or the NO_SHOW auto-marking job | In-process Java method call |
+| Loyalty & Rewards | U → D (target design, not yet wired) | Notifications | "Notify client on sticker granted / reward redeemed" — **not implemented.** `LoyaltyService.grantSticker()` and `.redeemReward()` do not call `NotificationService` as of this review | In-process Java method call (planned) |
+| All contexts | U → D | Finance & Inventory | Manual registration by admin; appointment revenue logged | HTTP REST (admin screens) |
+| All contexts | U → D | Platform Administration | Cross-tenant reads via Super Admin dashboard | HTTP REST (`/api/super-admin/**`) |
 
 ---
 
 ## 4. Core Domain, Supporting, Generic
 
-DDD classifies subdomains by their strategic value:
-
-| Type | Description | Investment | Example |
-|------|-------------|-----------|---------|
-| **Core Domain** | Where the business competitive advantage lies. What differentiates us. | MAXIMUM — build, don't buy | Matching algorithm |
-| **Supporting Subdomain** | Necessary for the core but not differentiating. Can be outsourced. | MEDIUM | Order management |
-| **Generic Subdomain** | Commodity. Off-the-shelf solution exists. | MINIMUM — buy/use OSS | Authentication, emails |
-
-### Classification of this project's bounded contexts
-
 | Bounded Context | Type | Justification |
-|----------------|------|---------------|
-| [Context A] | Core | [why it is the heart of the business] |
-| [Context B] | Supporting | [why it supports without being differentiating] |
-| [Context C] | Generic | [standard solution available] |
+|---|---|---|
+| **Appointment** | **Core Domain** | The anti-double-booking mechanism, the 6-state machine, and walk-in support are the primary competitive differentiator. No off-the-shelf solution handles Colombian barbershop workflows. |
+| **Loyalty & Rewards** | **Core Domain** | The sticker → coupon → automatic discount pipeline is a key retention feature specific to BarberSaaS. Drives repeat visits and differentiates from WhatsApp-based competitors. |
+| **Barbershop Management** | **Supporting** | Essential but not unique — multi-tenant CRUD with plan management. Could eventually be handled by a generic SaaS platform, but is built in-house to keep full control over the onboarding flow and trial logic. |
+| **Schedule** | **Supporting** | Barber schedule configuration supports the Appointment core but is not itself a differentiator. |
+| **Finance & Inventory** | **Supporting** | Necessary for shop owner visibility but not the reason barbershops choose BarberSaaS. |
+| **Platform Administration** | **Supporting** | Internal tooling for the BarberSaaS team — no direct user-facing value, but critical for operations. |
+| **Identity & Auth** | **Generic** | Standard JWT authentication. Uses BCrypt + Spring Security — commodity patterns. Will never be a competitive advantage. |
+| **Notifications** | **Generic** | FCM + Gmail SMTP — uses off-the-shelf services. The integration layer is custom but the capability itself is commodity. |
 
 ---
 
 ## 5. Modeling decisions
 
-### How were these decisions made?
+### How this map was built
 
-> Document the Event Storming session or the process you used to arrive at the map.
-> If you changed the map, explain why.
-
-- **Event Storming session:** [date], [participants]
-- **Tool used:** [Miro / Lucidchart / physical whiteboard]
-- **Map iterations:** v1 (date), v2 (date)
+- **Method:** Solo architectural walkthrough + incremental refinement as each bounded context was implemented (Phases 1–16 of the BarberSaaS development plan)
+- **Tool:** Implementation-driven — bounded contexts map directly to Java packages (`com.barbersaas.[context]`)
+- **Iterations:** v1 (Phase 1 — Auth + Barbershop), v2 (Phase 5 — Appointment added), v3 (Phase 6 — Loyalty added), current v4 (Phase 16 — full system including walk-in and password recovery)
 
 ### Key decisions and discarded alternatives
 
 | Decision | Discarded alternative | Reason |
-|----------|----------------------|--------|
-| [Separate Context A and B] | [Have them in one] | [Business logic is different and they evolve at different rates] |
+|---|---|---|
+| Keep Schedule as a Shared Kernel with Appointment (same DB tables) | Extract Schedule as a separate microservice | At current scale, the shared table is simpler. No independent scaling need identified yet. Trigger for extraction: >10,000 barbershops. |
+| Loyalty hooks directly into Appointment via in-process call | Event-driven (publish `AppointmentCompleted` event, Loyalty subscribes) | No message broker in MVP. In-process call is synchronous and easier to reason about. Event-driven will be introduced when Notifications moves to its own service. |
+| Single PostgreSQL schema for all bounded contexts | One database per bounded context | Operational simplicity for MVP. The multi-tenancy discriminator (`barbershop_id`) provides logical isolation. Physical separation is a future ADR trigger. |
 
 ---
 
 ## 6. How to update this map
 
-1. Before adding a new microservice, verify whether it belongs to an existing bounded context.
-2. If a context's ubiquitous language is changing, review whether the context should be split.
-3. Run an Event Storming session every time the domain changes significantly.
-4. The context map MUST be synchronized with the C4 system-level diagram (`05-architecture/overview.md`).
+1. Before adding a new feature, identify which bounded context it belongs to.
+2. If a term starts meaning different things in different places — that is a signal that a context needs to split.
+3. This map must stay synchronized with:
+   - Microservice catalog → `09-microservices/service-catalog.md`
+   - C4 system diagram → `05-architecture/overview.md`
+   - ADRs for service extraction → `05-architecture/decisions/`
+4. Run an Event Storming session any time the domain changes significantly (e.g., adding a payments context, splitting Appointment from Availability).
 
-> **Important correlation:** The bounded contexts in this document →
-> Microservices in `09-microservices/service-catalog.md` →
+> **Correlation:** Bounded contexts here →
+> Modules in `09-microservices/service-catalog.md` →
 > C4 diagrams in `08-uml/` →
-> Service separation ADRs in `05-architecture/decisions/`
+> Extraction ADRs in `05-architecture/decisions/`

@@ -20,6 +20,7 @@ ADRs document important architectural decisions. Each file = one decision.
 
 | # | Title | Status | Date |
 |---|-------|--------|------|
-| None yet | — | — | — |
+| [ADR-001](records/ADR-001-idioma-documentacion.md) | Documentation Language (English for code and docs) | Accepted | 2026-08-20 |
+| [ADR-002](records/ADR-002-modular-monolith.md) | Architectural Style: Modular Monolith | Accepted | 2026-08-31 |
 
 > Add rows here as you create ADRs in `records/`

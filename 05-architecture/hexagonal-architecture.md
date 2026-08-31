@@ -12,6 +12,24 @@
 > - Python + FastAPI → [`_stacks/python-fastapi.md`](../_stacks/python-fastapi.md)
 > - Go → [`_stacks/go.md`](../_stacks/go.md)
 
+> **Reality check — BarberSaaS does NOT follow this structure today.** `_stacks/java-spring.md`
+> and this document both describe a full ports/adapters split (`domain/port/in`,
+> `domain/port/out`, a separate `application/` use-case layer, `infrastructure/adapters/`).
+> The real backend (`barbersaas-backend/src/main/java/com/barbersaas/`) uses a flatter
+> structure per bounded-context module: `Controller` → `Service` (calls JPA repositories
+> directly) → `dto/`, with entities and repositories centralized under a shared
+> `com.barbersaas.domain/` package (`entity/`, `enums/`, `repository/`) rather than one
+> `domain/` folder per module. There are no `port/in`/`port/out` interfaces and no separate
+> `application/` layer — verified by inspecting `com.barbersaas.appointment` (no `domain/`,
+> `application/`, or `infrastructure/` subpackages exist there).
+>
+> This matters because **ADR-002 and `00-governance/documentation-rules.md`'s code-review
+> checklist reference "the hexagonal/bounded-context checklist"** as if it applies literally.
+> Treat the bounded-context package boundary (one Java package per module, ADR-002) as the
+> real, enforced rule; treat everything else on this page (ports, the `application/` layer,
+> the dependency-inversion example) as **educational reference material**, not a description
+> of this codebase, until/unless the team decides to actually refactor toward it.
+
 ---
 
 ## The problem it solves
@@ -321,7 +339,15 @@ describe('CreateOrderUseCase', () => {
 
 ## Hexagonal Architecture Checklist
 
-When reviewing a PR or new service, verify:
+> The checklist below is the textbook version. **What BarberSaaS code review should
+> actually enforce today** (per ADR-002's bounded-context rule, not this literal ports
+> structure):
+> - [ ] No module (`com.barbersaas.<context>`) directly imports another module's repository or service — only shared `com.barbersaas.domain` entities/repositories and `com.barbersaas.security` may be imported across module boundaries
+> - [ ] Every tenant-scoped query filters by `barbershopId` via `TenantContext`
+> - [ ] There is a unit test for each business invariant listed in `02-domain/entities-and-rules.md` (currently: none exist — see `04-requirements/traceability-matrix.md`)
+>
+> The textbook checklist below applies only if/when the team decides to actually adopt
+> ports & adapters — it does not describe a rule currently enforced in this codebase:
 
 - [ ] `domain/` has no imports from `infrastructure/` or `application/`
 - [ ] `domain/` has no imports from frameworks (Express, NestJS, TypeORM, etc.)

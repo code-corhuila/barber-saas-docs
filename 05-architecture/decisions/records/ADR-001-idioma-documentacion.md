@@ -3,10 +3,10 @@
 | Field | Value |
 |-------|-------|
 | **ID** | ADR-001 |
-| **Date** | 2024-01-10 |
+| **Date** | 2026-08-20 (repo initialization commit — see `git log` on this file; the exact decision-meeting date was not separately recorded) |
 | **Status** | Accepted |
-| **Authors** | María García — Tech Lead |
-| **Reviewers** | Carlos Méndez, Sofía Torres, Andrés Ruiz — Development team |
+| **Authors** | Carlos Leal — Tech Lead |
+| **Reviewers** | Daniel Cerquera, Juan Pablo Borrero, Carolay Arraut — BarberSaaS team |
 
 ---
 

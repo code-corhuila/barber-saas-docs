@@ -538,20 +538,21 @@ Kubernetes Pod:
 
 ## Patterns adopted in this project
 
-> **Fill in with your specific project's decisions.**
-> For each pattern: decide whether it is adopted, document the ADR that justifies the decision,
-> and link to the section in this document where you learned when to use it.
+> Kept in sync with the authoritative table in `05-architecture/overview.md` §6 — if they
+> ever disagree, `overview.md` wins and this table should be corrected to match.
 
 | Pattern | Adopted? | Justification / ADR |
 |---------|---------|---------------------|
-| API Gateway | [Yes / No — see ADR-NNN] | [Brief reason] |
-| Database per Service | [Yes / No — see ADR-NNN] | [Brief reason] |
-| Circuit Breaker | [Yes / No — see ADR-NNN] | [Brief reason] |
-| Saga (choreographed) | [Yes / No — see ADR-NNN] | [Brief reason] |
-| Outbox Pattern | [Yes / No — see ADR-NNN] | [Brief reason] |
-| CQRS | [Yes / No — see ADR-NNN] | [Brief reason] |
-| Event Sourcing | [Yes / No — see ADR-NNN] | [Brief reason] |
-| BFF | [Yes / No — see ADR-NNN] | [Brief reason] |
+| API Gateway | **No** | BarberSaaS is a single Spring Boot deployable unit (ADR-002) — there is no separate gateway process; `JwtAuthenticationFilter` handles what a gateway would (auth) in-process |
+| Database per Service | **No** | Single shared MySQL/PostgreSQL schema, tenant-isolated by `barbershop_id`, not by physical DB separation — ADR-002 |
+| Circuit Breaker | **No** | Not required at current scale; FCM push failures degrade gracefully by design (notification persisted to DB first) rather than via a breaker — see `05-architecture/overview.md` §6 |
+| Saga (choreographed) | **No** | Inter-module calls (e.g., Appointment → Loyalty) are in-process Java method calls within one transaction, not distributed transactions across services — ADR-002 |
+| Outbox Pattern | **Partial** | Notifications are written to the DB before the external FCM dispatch attempt — same intent as an outbox (durable-then-deliver), without a dedicated `outbox` table or relay process |
+| CQRS | **No** | Read and write models are the same JPA entities; no read/write model split |
+| Event Sourcing | **No** | State is stored as current-value rows (JPA entities), not as a replayable event log — the one exception is `LoyaltyTransaction`, which is an append-only audit log for loyalty actions specifically, not full event sourcing of the domain |
+| BFF | **No** | One mobile client (Expo/React Native) consumes the API directly; no per-client backend exists or is needed yet |
+| Pessimistic Locking | **Yes** | `PESSIMISTIC_WRITE` on appointment creation — the anti-double-booking mechanism, ADR referenced in `overview.md` §6 |
+| Trigger-based service extraction | **Yes** | Documented, measurable extraction triggers per module — ADR-002 |
 
 ---
 
