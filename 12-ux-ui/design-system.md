@@ -4,6 +4,11 @@
 > It prevents inconsistencies, accelerates design, and reduces rework.
 > **Rule:** Before creating a new component, check here if it already exists.
 
+> **Source of the tokens below:** extracted visually from `mockup-auth-onboarding.png`
+> (auth/onboarding screens). These are close approximations, not pixel-sampled values —
+> **confirm the exact hex codes against the original Figma file** before using them in
+> production code, and update this file once confirmed.
+
 ---
 
 ## Design tokens
@@ -13,38 +18,41 @@ Tokens are the design system's variables. Changing a token changes the entire sy
 ### Colors
 
 ```css
-/* Base palette */
---color-primary-50:  #[hex];   /* Lightest */
---color-primary-100: #[hex];
---color-primary-500: #[hex];   /* Default */
---color-primary-900: #[hex];   /* Darkest */
+/* Base palette — dark theme, gold/yellow accent */
+--color-bg-page:    #0D0D0D;   /* Near-black app background, seen on every screen */
+--color-bg-card:    #1A1A1A;   /* Slightly lighter panels/cards */
+--color-bg-input:   #1E1E1E;   /* Text input fill */
+--color-border:     #3A3A3A;   /* Input/card borders on dark background */
 
---color-secondary-500: #[hex];
---color-neutral-50:  #[hex];
---color-neutral-900: #[hex];
+--color-primary-500: #F2C230;  /* Gold/yellow — primary buttons ("Iniciar sesión",
+                                   "Registrarme", "Continuar"), logo badge accent */
+--color-primary-700: #C99A1E;  /* Darker gold — pressed/hover state (estimated) */
 
-/* Semantic colors */
---color-success:  #[hex];      /* Green — success, confirmed */
---color-warning:  #[hex];      /* Yellow — caution, pending */
---color-error:    #[hex];      /* Red — error, cancelled */
---color-info:     #[hex];      /* Blue — neutral information */
+--color-secondary-500: #000000; /* Secondary button fill ("Crear cuenta"), black with
+                                    white text/border */
+
+/* Semantic colors — not yet visible in the mockup, proposed to match the palette
+   until the team confirms them */
+--color-success:  #388E3C;
+--color-warning:  #F2C230;      /* reuse primary gold for warnings, avoid a second yellow */
+--color-error:    #D32F2F;
+--color-info:     #3B82F6;
 
 /* Text */
---color-text-primary:   #[hex];
---color-text-secondary: #[hex];
---color-text-disabled:  #[hex];
+--color-text-primary:   #FFFFFF; /* Titles, primary labels on dark background */
+--color-text-secondary: #9CA3AF; /* Helper text, placeholders */
+--color-text-on-primary: #0D0D0D; /* Text/icon color on top of the gold buttons */
+--color-text-disabled:  #5A5A5A;
 
 /* Backgrounds */
---color-bg-page:    #[hex];
---color-bg-card:    #[hex];
---color-bg-overlay: rgba([r],[g],[b], 0.5);
+--color-bg-overlay: rgba(0,0,0,0.6);
 ```
 
 ### Typography
 
 ```css
-/* Families */
---font-family-sans:  '[Font name], sans-serif';
+/* Families — the mockup uses a clean system sans-serif; exact family not yet confirmed */
+--font-family-sans:  'Inter, system-ui, sans-serif'; /* placeholder until confirmed */
 --font-family-mono:  '[Mono font name], monospace';
 
 /* Sizes (modular scale 1.25) */
@@ -84,13 +92,13 @@ Tokens are the design system's variables. Changing a token changes the entire sy
 ### Borders and shadows
 
 ```css
-/* Border radius */
+/* Border radius — the mockup's buttons and inputs read as moderately rounded */
 --radius-sm: 4px;
 --radius-md: 8px;
 --radius-lg: 16px;
 --radius-full: 9999px;  /* Pill */
 
-/* Shadows */
+/* Shadows — mostly invisible on a near-black background, kept for light surfaces */
 --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
 --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
 --shadow-lg: 0 10px 15px rgba(0,0,0,0.15);
@@ -102,10 +110,14 @@ Tokens are the design system's variables. Changing a token changes the entire sy
 
 ### Buttons
 
+Observed in the mockup: a filled gold `Primary` button used for the main call to action on
+every auth screen (`Iniciar sesión`, `Registrarme`, `Continuar`), and a filled black
+`Secondary` button with white text for the alternate action (`Crear cuenta`).
+
 | Variant | Use | Disabled state |
 |---------|-----|----------------|
-| Primary | Main action on the page | `opacity: 0.5; cursor: not-allowed` |
-| Secondary | Secondary actions | same |
+| Primary (gold fill, dark text) | Main action on the page | `opacity: 0.5; cursor: not-allowed` |
+| Secondary (black fill, white text) | Secondary actions | same |
 | Danger | Destructive actions (delete) | same |
 | Ghost | Tertiary actions, links | same |
 
@@ -115,6 +127,10 @@ Tokens are the design system's variables. Changing a token changes the entire sy
 - Buttons have a loading state for async operations
 
 ### Forms
+
+Observed in the mockup: dark-filled inputs (`--color-bg-input`) with a subtle border, a
+password field with a visibility toggle, and a step indicator (1-2-3 dots) for the
+multi-step owner registration wizard.
 
 | Component | When to use |
 |-----------|-------------|
@@ -126,6 +142,7 @@ Tokens are the design system's variables. Changing a token changes the entire sy
 | Radio | Select one option from a few (2-5) |
 | Toggle | Enable/disable a feature |
 | DatePicker | Date selection |
+| Step indicator | Multi-step forms (e.g. owner registration wizard) |
 
 **Error messages in forms:**
 - The message appears below the field, in red
@@ -172,6 +189,8 @@ Tokens are the design system's variables. Changing a token changes the entire sy
 
 4. **Empty state as a feature:** The screen without data is the new user's first impression — guide them to the first action.
 
+5. **Role clarity at sign-up:** The role picker (`/register-choice`) makes the user explicitly choose client / barbershop owner / barber before anything else, since the whole app shell depends on that role.
+
 ### Error handling
 
 | Scenario | What to show |
@@ -189,7 +208,7 @@ Tokens are the design system's variables. Changing a token changes the entire sy
 
 | Aspect | Minimum required |
 |--------|-----------------|
-| Text contrast | WCAG AA (4.5:1 for normal text, 3:1 for large text) |
+| Text contrast | WCAG AA (4.5:1 for normal text, 3:1 for large text) — **check gold-on-dark and white-on-dark combinations against this once the exact hex values are confirmed** |
 | Keyboard navigation | All interactive elements accessible with Tab |
 | Form labels | All fields with associated label (`for` / `aria-label`) |
 | Images | Descriptive alt text on all non-decorative images |
@@ -200,5 +219,5 @@ Tokens are the design system's variables. Changing a token changes the entire sy
 ## Correlations
 
 - Navigation map → `12-ux-ui/navigation-map.md`
-- Wireframes → `12-ux-ui/wireframes.md`
+- Mockup (auth/onboarding flow) → `12-ux-ui/mockup-auth-onboarding.png`
 - UX non-functional requirements → `04-requirements/non-functional.md`
