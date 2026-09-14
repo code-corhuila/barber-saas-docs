@@ -82,7 +82,10 @@ Organización por **route groups según rol**: `(auth)`, `(client)`, `(barber)`,
 
 ## Convenciones
 
-**Ramas:** `spec/NNN-slug` · `feat/NNN-slug` · `fix/NNN-slug` · `docs/NNN-slug` · `chore/NNN-slug`
+**Ramas:** solo `docs/NNN-slug` (`NNN` = número de SPEC). Este repo es solo `main` — sin
+`dev`/`qa` — y cada cambio va por una rama `docs/NNN-slug` con Pull Request y squash merge
+a `main`. Fuente de verdad: `00-governance/git-conventions.md` § "Scope and per-repo
+exceptions" (no dupliques esta regla en otro lado; si cambia, cambia solo ahí).
 
 **Commits** — Conventional Commits con trailer de trazabilidad:
 ```

@@ -2,6 +2,27 @@
 
 > **Read this document before making your first commit on the project.**
 
+## Scope and per-repo exceptions
+
+This document is the general standard for the whole project. The `main ← dev ← feat/...`
+strategy below assumes a repo with a real CI/CD environment to stage through. Not every
+repo in the ecosystem has one — where that's the case, the exception below overrides the
+general strategy for that repo only (per "How governance applies" in `00-governance/
+README.md`: changed through team agreement, documented here with the reason).
+
+| Repo | Branch strategy | Reason |
+|---|---|---|
+| **CODE** (`barber-saas`) | `main` ← `dev`/`qa` ← `feat/fix/chore/hotfix`, as described below | Real CI environments per stage |
+| **DOCS** (this repo) | Only `main`. No `dev`/`qa`. One branch per change, named `docs/NNN-slug` (`NNN` = the SPEC number the change implements), one PR each, **squash merge** straight into `main` | Documentation-only repo, no build/deploy pipeline to stage through a `dev` environment. Decided 2026-09-14. |
+
+> **CODE currently deviates further:** by explicit decision (2026-09-14), no new branch is
+> created per task — work happens directly on `develop`. This is a temporary, explicit
+> exception to "every task = one branch + one PR" below, not an oversight; revisit it if
+> the team grows past a single contributor.
+
+The rest of this document (naming format, commit format, PR policy, merge policy) applies
+to every repo, including DOCS — only the branch *topology* differs.
+
 ## Branch strategy
 
 ```
@@ -32,6 +53,10 @@ fix/schedule-overlap-calculation
 chore/update-spring-dependencies
 hotfix/null-token-expiration
 ```
+
+**DOCS exception:** branches are named `docs/NNN-slug`, where `NNN` is the SPEC number
+(kept for traceability to `_ecosistema/specs/SPEC-NNN-*.md`). Example:
+`docs/002-academic-microservice-extraction`.
 
 ---
 
