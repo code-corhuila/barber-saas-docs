@@ -105,15 +105,15 @@ created, but there is no separate "event" record of the fact that triggered it).
 | Field | Value |
 |-------|-------|
 | **Bounded Context** | Appointment |
-| **Trigger** | `BARBER` or `ADMIN_BARBERSHOP` marks an `IN_PROGRESS` appointment as `COMPLETED` via `AppointmentService.complete()` |
-| **Effect** | Status change only — **no notification is sent, and no loyalty sticker is granted automatically.** The code comment is explicit: *"la asignacion de sticker de fidelizacion se hace... como un paso posterior explicito (no automatico)"* — sticker granting is a deliberate, separate staff action (see `StickerGranted` below), not a reaction to this event |
-| **Code reference** | `com.barbersaas.appointment.AppointmentService#complete` |
+| **Trigger** | `BARBER` or `ADMIN_BARBERSHOP` marks an `IN_PROGRESS`/`CONFIRMED` appointment as `COMPLETED` via `AppointmentService.complete()` |
+| **Effect** | Status change, income registered in Finance (`registerServiceIncome`), and — in the same transaction — `LoyaltyService.grantStickerForCompletedAppointment()` is called. If the barbershop has an active loyalty program, this grants a sticker (see `StickerGranted` below) using the completing staff member as `grantedBy`. If the barbershop has no active loyalty program, the call is a no-op: completing the appointment never fails because of this |
+| **Consumers** | Loyalty (conditional — only when a loyalty program is active for the barbershop) |
+| **Code reference** | `com.barbersaas.appointment.AppointmentService#complete`, `com.barbersaas.loyalty.LoyaltyService#grantStickerForCompletedAppointment` |
 
-> **Documentation drift flagged here:** `02-domain/domain-map.md` §2 (Appointment context) lists
-> `AppointmentCompleted` as what "triggers `grantSticker()`... after COMPLETED", implying an
-> automatic hook. The current code does **not** implement that — sticker granting requires a
-> separate authenticated call to `POST /api/loyalty/grant-sticker`. Treat `domain-map.md`'s
-> claim as the target design, not the current behavior, until reconciled.
+> **Known gap, not a drift:** the manual endpoint `POST /api/admin/loyalty/grant` still exists
+> and is not idempotent against an appointment that already triggered an automatic grant. If
+> staff also grant a sticker manually for the same completed appointment, the client can be
+> credited twice. Documented as a follow-up (candidate for a short SPEC), not fixed here.
 
 ---
 
@@ -123,10 +123,10 @@ created, but there is no separate "event" record of the fact that triggered it).
 |-------|-------|
 | **Bounded Context** | Loyalty & Rewards |
 | **Aggregate** | `LoyaltyCard` |
-| **Trigger** | `ADMIN_BARBERSHOP` or `BARBER` explicitly grants a sticker via `LoyaltyService.grantSticker()` — optionally linked to a completed appointment, but not required to be |
-| **Effect** | `LoyaltyCard.stickersCount` is incremented by 1 (the card is created on first grant if the client has none yet at this barbershop); a `LoyaltyTransaction` row (`type = STICKER_EARNED`) is persisted as the audit record |
+| **Trigger** | Either (a) `ADMIN_BARBERSHOP`/`BARBER` explicitly grants a sticker via `LoyaltyService.grantSticker()` (`POST /api/admin/loyalty/grant`), optionally linked to an appointment, or (b) automatically via `grantStickerForCompletedAppointment()` when an appointment is completed and the barbershop has an active loyalty program — which internally calls `grantSticker()`, so both paths share the same logic |
+| **Effect** | `LoyaltyCard.stickersCount` is incremented by 1 (the card is created on first grant if the client has none yet at this barbershop); a `LoyaltyTransaction` row (`type = STICKER_EARNED`) is persisted as the audit record; a `Notification` (`type = LOYALTY`) is created for the client |
 | **Persisted as its own record?** | **Yes** — `LoyaltyTransaction` is the one real append-only event log in the system today |
-| **Consumers** | None — **no `Notification` is created.** This contradicts `domain-map.md`'s claim ("Notify client on sticker granted") — not implemented in `LoyaltyService.java` as of this review |
+| **Consumers** | Notification module |
 | **Code reference** | `com.barbersaas.loyalty.LoyaltyService#grantSticker` |
 
 ---
@@ -138,9 +138,9 @@ created, but there is no separate "event" record of the fact that triggered it).
 | **Bounded Context** | Loyalty & Rewards |
 | **Aggregate** | `LoyaltyCard` |
 | **Trigger** | `ADMIN_BARBERSHOP` or `BARBER` redeems a reward on behalf of a client (at the moment the physical reward is handed over) via `LoyaltyService.redeemReward()`, once `stickersCount >= stickersRequired` |
-| **Effect** | `LoyaltyCard.stickersCount` decremented by `stickersRequired`, `totalRewardsRedeemed` incremented, a new `RewardCoupon` (`status = ACTIVE`) is created, and a `LoyaltyTransaction` row (`type = REWARD_REDEEMED`) is persisted — all in the same transaction |
+| **Effect** | `LoyaltyCard.stickersCount` decremented by `stickersRequired`, `totalRewardsRedeemed` incremented, a new `RewardCoupon` (`status = ACTIVE`) is created, a `LoyaltyTransaction` row (`type = REWARD_REDEEMED`) is persisted, and a `Notification` (`type = LOYALTY`) is created for the client — all in the same transaction |
 | **Persisted as its own record?** | Yes — `LoyaltyTransaction` row, plus the `RewardCoupon` itself as a first-class entity |
-| **Consumers** | The `RewardCoupon` is later consumed by `AppointmentService.create()` (see `AppointmentCreated` above) when the client books their next appointment. **No `Notification` is created at redemption time** — same drift as `StickerGranted` above |
+| **Consumers** | Notification module; the `RewardCoupon` is later consumed by `AppointmentService.create()` (see `AppointmentCreated` above) when the client books their next appointment |
 | **Code reference** | `com.barbersaas.loyalty.LoyaltyService#redeemReward` |
 
 ---
@@ -166,9 +166,9 @@ created, but there is no separate "event" record of the fact that triggered it).
 | `AppointmentCancelled` | Appointment | In-process method call | Notification | No |
 | `AppointmentReminderDue` | Appointment | Scheduled job (cron, daily 18:00) | Notification | No |
 | `AppointmentMarkedNoShow` | Appointment | Scheduled job (cron, daily 01:00) | *(none — silent)* | No |
-| `AppointmentCompleted` | Appointment | In-process method call | *(none today — see drift note)* | No |
-| `StickerGranted` | Loyalty & Rewards | In-process method call | *(none today — see drift note)* | **Yes** — `LoyaltyTransaction` |
-| `RewardRedeemed` | Loyalty & Rewards | In-process method call | Appointment (coupon consumption, later) | **Yes** — `LoyaltyTransaction` + `RewardCoupon` |
+| `AppointmentCompleted` | Appointment | In-process method call | Loyalty (conditional — only if the barbershop has an active program; see known gap above) | No |
+| `StickerGranted` | Loyalty & Rewards | In-process method call | Notification | **Yes** — `LoyaltyTransaction` |
+| `RewardRedeemed` | Loyalty & Rewards | In-process method call | Notification; Appointment (coupon consumption, later) | **Yes** — `LoyaltyTransaction` + `RewardCoupon` |
 | `PasswordResetRequested` | Identity & Auth | In-process method call | Email (Gmail SMTP) | No |
 
 ---
