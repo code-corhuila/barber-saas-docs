@@ -211,6 +211,7 @@ documentation are in English per `ADR-001`.
 
 - Domain bounded contexts → `02-domain/domain-map.md`
 - Architectural style decision → `ADR-002-modular-monolith.md`
+- Academic microservice extraction exception (`notification-service`) → `ADR-003-academic-microservice-extraction.md`
 - Documentation language decision → `ADR-001-idioma-documentacion.md`
 - Hexagonal architecture per module (internal structure) → `05-architecture/hexagonal-architecture.md`
 - Applied patterns catalog → `05-architecture/pattern-guide.md`
