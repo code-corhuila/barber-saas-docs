@@ -244,10 +244,10 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 | Barbershop Management | U → D | Appointment | `barbershopId` FK in `appointments` | JPA entity reference |
 | Barbershop Management | U → D | Schedule | `barberProfileId` FK in `barber_schedules` | JPA entity reference |
 | Schedule | Shared Kernel | Appointment | Shared `barber_schedules` / `schedule_exceptions` tables | JPA — same PostgreSQL schema |
-| Appointment | U → D (target design, not yet wired) | Loyalty & Rewards | `grantSticker()` — **not actually called automatically on COMPLETED as of this review.** `AppointmentService.complete()` only changes status; sticker granting requires a separate explicit call to `POST /api/loyalty/grant-sticker` by staff. See `02-domain/domain-events.md` → `AppointmentCompleted` drift note | In-process Java method call (manual trigger today, not event-driven) |
+| Appointment | U → D | Loyalty & Rewards | `AppointmentService.complete()` calls `LoyaltyService.grantStickerForCompletedAppointment()` in the same transaction — grants a sticker automatically if the barbershop has an active loyalty program, no-ops otherwise (does not fail the completion). See `02-domain/domain-events.md` → `AppointmentCompleted` | In-process Java method call |
 | Loyalty & Rewards | U → D | Appointment | `RewardCoupon` check in `AppointmentService.create()` — confirmed in code | In-process Java method call |
 | Appointment | U → D | Notifications | `NotificationService.notify()` after `create()`, `confirm()`, `cancel()`, and the daily reminder job — confirmed in code. **Not** called after `complete()` or the NO_SHOW auto-marking job | In-process Java method call |
-| Loyalty & Rewards | U → D (target design, not yet wired) | Notifications | "Notify client on sticker granted / reward redeemed" — **not implemented.** `LoyaltyService.grantSticker()` and `.redeemReward()` do not call `NotificationService` as of this review | In-process Java method call (planned) |
+| Loyalty & Rewards | U → D | Notifications | `LoyaltyService.grantSticker()` and `.redeemReward()` call `NotificationService.notify()` (`Notification.Type.LOYALTY`) after persisting the `LoyaltyTransaction` | In-process Java method call |
 | All contexts | U → D | Finance & Inventory | Manual registration by admin; appointment revenue logged | HTTP REST (admin screens) |
 | All contexts | U → D | Platform Administration | Cross-tenant reads via Super Admin dashboard | HTTP REST (`/api/super-admin/**`) |
 
