@@ -9,11 +9,11 @@ info:
     1. `POST /auth/register` — crear cuenta
     2. `POST /auth/login` — obtener access_token + refresh_token
     3. Usar `access_token` en el header `Authorization: Bearer` para todos los demás endpoints
-    4. Cuando el access_token expire (1h): `POST /auth/refresh` con el refresh_token
+    4. Cuando el access_token expire (24h): `POST /auth/refresh` con el refresh_token
     5. Para cerrar sesión: `POST /auth/logout`
 
     ## Tokens
-    - **access_token**: JWT RS256, expira en 1 hora. Incluye userId, email, roles, permissions.
+    - **access_token**: JWT HS512, expira en 24 horas. Incluye userId, email, roles, permissions.
     - **refresh_token**: Opaque token (UUID), expira en 7 días. Solo válido una vez (rotación).
 
 servers:
@@ -253,14 +253,14 @@ components:
       properties:
         accessToken:
           type: string
-          description: JWT RS256. Incluir en Authorization Bearer para requests autenticados.
+          description: JWT HS512. Incluir en Authorization Bearer para requests autenticados.
         refreshToken:
           type: string
           description: Opaque token. Usar en POST /refresh cuando el access token expire.
         expiresIn:
           type: integer
           description: Segundos hasta la expiración del access token
-          example: 3600
+          example: 86400
         user:
           $ref: '#/components/schemas/UserSummary'
 
@@ -279,7 +279,7 @@ components:
           type: array
           items:
             type: string
-            enum: [ADMIN, USER, VIEWER]
+            enum: [ADMIN_BARBERSHOP, BARBER, CLIENT, SUPER_ADMIN]
         permissions:
           type: array
           items:
