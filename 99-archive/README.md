@@ -13,8 +13,9 @@
 
 ```
 99-archive/
-├── deprecated/         ← Documents replaced by others (move here with a note)
-└── old-decisions/      ← Proposals and decisions that did not move forward
+├── deprecated/                 ← Documents replaced by others (move here with a note)
+├── old-decisions/              ← Proposals and decisions that did not move forward
+└── related-repositories.md     ← Pointer to the other repos in the ecosystem (code, weekly academic tracking)
 ```
 
 ## How to archive a document
