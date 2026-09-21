@@ -4,7 +4,7 @@
 |-------|-------|
 | **ID** | ADR-002 |
 | **Date** | 2026-08-31 |
-| **Status** | Accepted |
+| **Status** | Superseded by ADR-004 (2026-09-20) |
 | **Authors** | Carlos Mauricio Leal Medina, Daniel Felipe Cerquera Idrobo, Juan Pablo Borrero Morales, Carolay Arraut Heredia |
 
 ---
@@ -111,3 +111,7 @@ condition justifies it (documented per module in Section "Planned evolution" of
 - Related to: `ADR-001-idioma-documentacion.md`
 - Internal module structure guidance → `05-architecture/hexagonal-architecture.md`
 - Applied patterns → `05-architecture/pattern-guide.md`
+- **Superseded by:** `ADR-004-full-microservice-decomposition.md` — the course requirement
+  moved from "modular monolith, trigger-based extraction" to full microservice decomposition.
+  The bounded-context boundaries this ADR established remain the basis for the extracted
+  services' boundaries; the "stay a monolith by default" decision itself no longer applies.
