@@ -17,12 +17,12 @@ info:
 servers:
   - url: http://localhost:8080/api/notifications
     description: Local (current, served by the monolith)
-  - url: https://api.dev.{domain}/v1/notification
+  - url: https://api.dev.{domain}/api/v1/notifications
     description: Development (planned, once extracted)
     variables:
       domain:
         default: example.com
-  - url: https://api.{domain}/v1/notification
+  - url: https://api.{domain}/api/v1/notifications
     description: Production (planned, once extracted)
     variables:
       domain:
