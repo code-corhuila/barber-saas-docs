@@ -14,6 +14,11 @@
 - BarberSaaS is currently a single modular monolith exposing one version (`v1`) under
   role-prefixed paths (`/api/public`, `/api/auth`, `/api/client`, `/api/barber`,
   `/api/admin`, `/api/super-admin`) — see `05-architecture/overview.md` §5 (P5).
+- There is no `api-gateway.yaml` contract under `contracts/openapi/`, and there shouldn't
+  be one yet: SPEC-002 already removed the fictional `01-api-gateway/` component from
+  `09-microservices/service-catalog.md` (no such service exists or is implemented; clients
+  reach the monolith directly). The OpenAPI stub for it was a leftover from the template
+  and was dropped for the same reason, not as an unrelated cleanup.
 
 ## Endpoint naming
 

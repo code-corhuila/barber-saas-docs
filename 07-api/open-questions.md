@@ -71,9 +71,21 @@ ADR nor the contract says *when*, or who drives the extraction.
 (per ADR-002/003's incremental-extraction rationale), so committing to a date now would be
 speculative.
 
+**Naming is open too, for the same reason.** The course convention names an extracted
+component `<abbr>-<domain>-<piece>`, but assigning that name now would mean picking a side
+of a question the team hasn't formally closed: ADR-002/003 (currently in effect) describe
+one service extracted incrementally from the monolith, while a full-polyrepo split
+(one repo per domain, with notification split further into separate api/app/db pieces) has
+already started being explored outside this repo but isn't recorded as a decision here.
+Naming the component today would silently pick the second model without the ADR to back
+it — the name is a consequence of that decision, not a substitute for making it.
+
 **Responsible:** Daniel Cerquera — flag for the team's next MVP-boundary planning session
 (see `00-governance/branching-policy.md`'s MVP cadence) so a target MVP (2 or 3) gets
-assigned instead of leaving it undated indefinitely.
+assigned, the monolith-extraction-vs-polyrepo question gets resolved with its own ADR, and
+the component name follows from whichever wins.
 
-**Closing criterion:** `notification-service.yaml`'s `info.description` names a target MVP
-milestone, and that milestone is tracked in `15-project-control/`.
+**Closing criterion:** an ADR resolves whether notification extracts as one service or a
+polyrepo split, `notification-service.yaml`'s `info.description` names the resulting
+component per `<abbr>-<domain>-<piece>` and a target MVP milestone, and that milestone is
+tracked in `15-project-control/`.
