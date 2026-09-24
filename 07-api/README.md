@@ -119,6 +119,11 @@ security:
 ### `_shared.yaml`
 Reusable schemas and components across all contracts (pagination, errors, etc.)
 
+### `open-questions.md`
+What this section deliberately leaves open — each gap with its evidence, why it isn't
+closed yet, an owner, and the condition that closes it. Not a TODO list: a gap only belongs
+here once there's a real reason it can't be closed today.
+
 ---
 
 ## Recommended tools

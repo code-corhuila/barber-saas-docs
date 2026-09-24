@@ -1,0 +1,191 @@
+openapi: 3.0.3
+info:
+  title: Notification Service API
+  version: 1.0.0
+  description: |
+    Planned contract for when notification is extracted from the modular monolith per
+    ADR-003. Not yet an independently deployed service.
+
+    Today, `notification` is an internal module of the `barbersaas-backend` monolith
+    (`com.barbersaas.notification`, endpoint prefix `/api/notifications`), sharing the
+    monolith's database and reached through in-process calls — not this contract. This
+    file documents the shape that module's API is expected to keep if/when it is
+    extracted as its own service, per
+    `09-microservices/services/notification/data-model.md` and
+    `09-microservices/services/notification/events.md`.
+
+servers:
+  - url: http://localhost:8080/api/notifications
+    description: Local (current, served by the monolith)
+  - url: https://api.dev.{domain}/api/v1/notifications
+    description: Development (planned, once extracted)
+    variables:
+      domain:
+        default: example.com
+  - url: https://api.{domain}/api/v1/notifications
+    description: Production (planned, once extracted)
+    variables:
+      domain:
+        default: example.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Notifications
+    description: In-app notifications for the authenticated user
+  - name: Device Tokens
+    description: FCM device token registration for push delivery
+
+paths:
+  /:
+    get:
+      summary: List the authenticated user's notifications
+      description: Returns a paginated list of notifications belonging to the caller.
+      operationId: listNotifications
+      tags: [Notifications]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - name: read
+          in: query
+          description: Filter by read/unread status
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: List of notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NotificationResponse'
+                  meta:
+                    $ref: './_shared.yaml#/components/schemas/PaginatedMeta'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /{id}/read:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+
+    post:
+      summary: Mark a notification as read
+      operationId: markNotificationRead
+      tags: [Notifications]
+      responses:
+        '200':
+          description: Notification marked as read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+
+  /device-tokens:
+    post:
+      summary: Register a device token for push delivery
+      description: |
+        Registers (or updates) the FCM token for the authenticated user's device, so
+        push notifications can be delivered to it.
+      operationId: registerDeviceToken
+      tags: [Device Tokens]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeviceTokenRequest'
+            example:
+              token: "fcm-device-token-example"
+              platform: ANDROID
+      responses:
+        '201':
+          description: Device token registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceTokenResponse'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+
+components:
+  schemas:
+    NotificationResponse:
+      description: An in-app notification belonging to the authenticated user
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, title, body, type, read, userId]
+          properties:
+            id:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            title:
+              type: string
+              description: Notification headline
+              example: Appointment confirmed
+            body:
+              type: string
+              description: Notification message
+              example: Your appointment tomorrow at 10:00 AM has been confirmed.
+            type:
+              type: string
+              description: >
+                Category of the notification (e.g. appointment confirmed, reminder).
+                See 09-microservices/services/notification/data-model.md — the set of
+                categories is not yet fixed to an enum.
+              example: APPOINTMENT_CONFIRMED
+            read:
+              type: boolean
+              description: Whether the user has opened/dismissed it
+            userId:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+
+    RegisterDeviceTokenRequest:
+      type: object
+      required: [token, platform]
+      properties:
+        token:
+          type: string
+          description: FCM device token
+          example: "fcm-device-token-example"
+        platform:
+          type: string
+          description: Device platform
+          enum: [ANDROID, IOS]
+
+    DeviceTokenResponse:
+      description: A registered device token
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required: [id, token, platform, userId]
+          properties:
+            id:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            token:
+              type: string
+              example: "fcm-device-token-example"
+            platform:
+              type: string
+              enum: [ANDROID, IOS]
+            userId:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+
+  securitySchemes:
+    bearerAuth:
+      $ref: './_shared.yaml#/components/securitySchemes/bearerAuth'
