@@ -3,9 +3,7 @@
 > `guidelines.md` and `authentication.md` close the contract's baseline decisions
 > (versioning, pagination, error format, JWT mechanism, roles, tenant isolation). This file
 > declares what the contract layer still leaves open on purpose — each with the evidence
-> that it's a real gap (not a guess), an owner, and the condition that closes it. Modeled
-> after the course's reference `api-contract.md` (week 8, session 2) declaring pending gaps
-> with a named responsible instead of leaving them implicit.
+> that it's a real gap (not a guess), an owner, and the condition that closes it.
 
 ## OQ-01 — No rate limiting contract on `/api/auth/**`
 
