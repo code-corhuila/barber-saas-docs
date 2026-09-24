@@ -1,0 +1,560 @@
+openapi: 3.0.3
+info:
+  title: Appointment Service API
+  version: 1.0.0
+  description: |
+    Servicio del bounded context Appointment: reserva y ciclo de vida de citas entre un
+    cliente y un barbero, en una barbería (tenant) concreta.
+
+    ## Autenticación
+    JWT Bearer (ver `_shared.yaml#/components/securitySchemes/bearerAuth`).
+    `barbershopId` se deriva del token vía `TenantContext` (ver `authentication.md`,
+    sección "Multi-tenancy") — **ningún endpoint de este contrato lo acepta como parámetro
+    explícito de query, de path ni del cuerpo de la petición.** Un token autenticado para
+    una barbería no puede leer ni escribir citas de otra, aunque adivine un `id` válido.
+
+    ## Roles
+    `ADMIN_BARBERSHOP` y `BARBER` gestionan las citas de su propia barbería (incluida la
+    creación de citas de walk-in, con `clientId` nulo). `CLIENT` reserva y consulta sus
+    propias citas. `SUPER_ADMIN` no participa en este contrato — opera a nivel de
+    plataforma, no de citas de una barbería.
+
+    ## Ciclo de vida
+    ```
+    PENDING ──(confirm)──▶ CONFIRMED ──(start)──▶ IN_PROGRESS ──(complete)──▶ COMPLETED
+       │                        │
+       │                        ├──(cancel)──▶ CANCELLED
+       │                        └──(no-show)──▶ NO_SHOW
+       └──(cancel)──▶ CANCELLED
+    ```
+    Detalle completo del state machine y los invariantes `INV-APPT-001` a `INV-APPT-005`
+    en `02-domain/entities-and-rules.md`, sección "Entity: Appointment".
+
+    ## Decisiones de diseño de este contrato
+
+    ### DEC-APPT-01 · El 404 no distingue "no existe" de "es de otra barbería"
+    Cuando `barberId`/`serviceId` (en `POST /appointments`) o `id` (en
+    `GET /appointments/{id}`) no existen, o existen pero pertenecen a una barbería
+    distinta a la del token, la respuesta es el mismo `404`. Distinguir los dos casos
+    confirmaría, a un token de una barbería, que un identificador de otra barbería sí
+    existe — una fuga de información entre tenants innecesaria para el cliente de la API.
+    Consecuencia de `INV-APPT-005` (consistencia de tenant).
+
+    ### DEC-APPT-02 · `priceAtBooking` se rechaza, no se ignora
+    `BookAppointmentRequest` usa `additionalProperties: false`: si el cliente envía
+    `priceAtBooking` (o `status`) en el cuerpo de `POST /appointments`, la petición
+    responde `400`, no lo descarta en silencio. `priceAtBooking` es un snapshot que
+    calcula el servidor y que queda inmutable tras la creación (`INV-APPT-002`); que un
+    valor enviado por el cliente desaparezca sin aviso sería más confuso que rechazarlo
+    explícitamente.
+
+servers:
+  - url: http://localhost:{port}
+    description: Local development
+    variables:
+      port:
+        default: '8082'
+  - url: https://api.dev.{domain}/v1/{service}
+    description: Development environment
+    variables:
+      domain:
+        default: example.com
+      service:
+        default: appointment-service
+  - url: https://api.{domain}/v1/{service}
+    description: Production
+    variables:
+      domain:
+        default: example.com
+      service:
+        default: appointment-service
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Appointments
+    description: Reserva, consulta y transiciones de estado de citas
+  - name: Health
+    description: Health check del servicio
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Verifica que el servicio esté funcionando y sus dependencias estén disponibles.
+      operationId: healthCheck
+      tags:
+        - Health
+      security: []
+      responses:
+        '200':
+          description: Servicio saludable
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  timestamp:
+                    type: string
+                    format: date-time
+              example:
+                status: ok
+                timestamp: '2026-09-24T10:00:00Z'
+        '503':
+          description: Servicio no disponible (en arranque o con dependencia caída)
+
+  /appointments:
+    get:
+      summary: Listar citas
+      description: |
+        Lista paginada de citas del tenant del token. `CLIENT` solo ve las suyas
+        (`clientId` propio, aplicado por el servidor, no por un filtro del cliente);
+        `ADMIN_BARBERSHOP`/`BARBER` ven todas las de la barbería.
+      operationId: listAppointments
+      tags:
+        - Appointments
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          description: Filtrar por estado exacto
+          schema:
+            $ref: '#/components/schemas/AppointmentStatus'
+        - name: barberId
+          in: query
+          description: Filtrar por barbero (solo tiene efecto para ADMIN_BARBERSHOP/BARBER)
+          schema:
+            $ref: './_shared.yaml#/components/schemas/UUID'
+        - name: date
+          in: query
+          description: Filtrar por fecha exacta de la cita (`YYYY-MM-DD`)
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Página de citas
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Appointment'
+                  meta:
+                    $ref: './_shared.yaml#/components/schemas/PaginatedMeta'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+    post:
+      summary: Reservar una cita
+      description: |
+        Crea una cita en estado `PENDING`. `priceAtBooking` lo calcula el servidor a partir
+        del precio vigente del `serviceId` en ese instante y queda inmutable desde ese
+        momento (`INV-APPT-002`) — el cliente nunca lo envía ni puede modificarlo después.
+      operationId: bookAppointment
+      tags:
+        - Appointments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookAppointmentRequest'
+            example:
+              barberId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              serviceId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+              clientId: null
+              date: '2026-10-01'
+              startTime: '14:30'
+      responses:
+        '201':
+          description: Cita creada en estado `PENDING`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '400':
+          description: |
+            Error de validación. Incluye, además de los campos obligatorios ausentes o mal
+            tipados, el caso en que el cuerpo de la petición trae `priceAtBooking` o
+            `status`: son campos de solo lectura calculados por el servidor
+            (`INV-APPT-002` — el snapshot de precio es inmutable y nunca lo fija el
+            cliente), y el esquema de la petición los rechaza como propiedad desconocida
+            (`DEC-APPT-02`).
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: VALIDATION_ERROR
+                message: No se puede fijar priceAtBooking directamente; lo calcula el servidor.
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '404':
+          description: |
+            `barberId` o `serviceId` no existen, **o existen pero pertenecen a una barbería
+            distinta a la del token** (`INV-APPT-005` — consistencia de tenant). Las dos
+            situaciones responden igual a propósito: distinguirlas confirmaría, a un token
+            de una barbería, que un identificador de otra barbería sí existe. Ver
+            `DEC-APPT-01` en `info.description`.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: NOT_FOUND
+                message: El barbero o el servicio indicado no existe.
+        '409':
+          description: |
+            El barbero ya tiene otra cita con un horario que se solapa con el solicitado
+            (`INV-APPT-001` — no doble-booking). La comprobación se hace con un bloqueo
+            pessimista sobre el horario del barbero, no es una condición de carrera
+            silenciosa.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: SLOT_ALREADY_BOOKED
+                message: El barbero ya tiene una cita en ese horario.
+
+  /appointments/{id}:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+
+    get:
+      summary: Obtener una cita por ID
+      operationId: getAppointmentById
+      tags:
+        - Appointments
+      responses:
+        '200':
+          description: Cita encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '404':
+          description: |
+            La cita no existe, **o existe pero pertenece a otra barbería** (`INV-APPT-005`)
+            — mismo criterio de no distinguir los dos casos que en `POST /appointments`
+            (`DEC-APPT-01`).
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+
+  /appointments/{id}/confirm:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+    post:
+      summary: Confirmar una cita (PENDING → CONFIRMED)
+      operationId: confirmAppointment
+      tags:
+        - Appointments
+      responses:
+        '200':
+          description: Cita confirmada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          description: Solo `ADMIN_BARBERSHOP` o `BARBER` confirman citas.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '409':
+          description: |
+            La cita no está en `PENDING` (`INV-APPT-004` — solo se permiten las
+            transiciones del state machine; confirmar una cita `CANCELLED`, por ejemplo,
+            se rechaza).
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: INVALID_TRANSITION
+                message: Solo una cita PENDING puede confirmarse.
+
+  /appointments/{id}/start:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+    post:
+      summary: Iniciar el servicio de una cita (CONFIRMED → IN_PROGRESS)
+      operationId: startAppointment
+      tags:
+        - Appointments
+      responses:
+        '200':
+          description: Servicio iniciado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          description: Solo `ADMIN_BARBERSHOP` o `BARBER` inician el servicio.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '409':
+          description: |
+            La cita no está en `CONFIRMED` (`INV-APPT-004`).
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: INVALID_TRANSITION
+                message: Solo una cita CONFIRMED puede iniciar el servicio.
+
+  /appointments/{id}/complete:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+    post:
+      summary: Finalizar el servicio de una cita (IN_PROGRESS → COMPLETED)
+      operationId: completeAppointment
+      tags:
+        - Appointments
+      responses:
+        '200':
+          description: Servicio finalizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          description: Solo `ADMIN_BARBERSHOP` o `BARBER` finalizan el servicio.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '409':
+          description: |
+            La cita no está en `IN_PROGRESS` (`INV-APPT-004`).
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: INVALID_TRANSITION
+                message: Solo una cita IN_PROGRESS puede finalizarse.
+
+  /appointments/{id}/cancel:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+    post:
+      summary: Cancelar una cita (PENDING/CONFIRMED → CANCELLED)
+      description: |
+        `ADMIN_BARBERSHOP` y `BARBER` están exentos de la ventana de cancelación
+        (`INV-APPT-003`); `CLIENT` solo puede cancelar antes de
+        `appointmentStartTime - barbershop.cancellationPolicyHours`.
+      operationId: cancelAppointment
+      tags:
+        - Appointments
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelAppointmentRequest'
+      responses:
+        '200':
+          description: Cita cancelada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '409':
+          description: |
+            La cita ya está en un estado terminal (`COMPLETED`, `CANCELLED` o `NO_SHOW`) y
+            no admite cancelación (`INV-APPT-004`).
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: INVALID_TRANSITION
+                message: La cita ya está en un estado terminal.
+        '422':
+          description: |
+            Un `CLIENT` intenta cancelar dentro de la ventana de cancelación de la
+            barbería (`INV-APPT-003`). No aplica a `ADMIN_BARBERSHOP` ni a `BARBER`.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: CANCELLATION_WINDOW_CLOSED
+                message: Ya no se puede cancelar esta cita; está dentro de la ventana de cancelación.
+
+  /appointments/{id}/no-show:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+    post:
+      summary: Marcar que el cliente no se presentó (CONFIRMED → NO_SHOW)
+      operationId: markAppointmentNoShow
+      tags:
+        - Appointments
+      responses:
+        '200':
+          description: Cita marcada como NO_SHOW
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          description: Solo `ADMIN_BARBERSHOP` o `BARBER` marcan una inasistencia.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '409':
+          description: |
+            La cita no está en `CONFIRMED` (`INV-APPT-004`) — no se puede marcar NO_SHOW
+            una cita que nunca fue confirmada ni una que ya avanzó a `IN_PROGRESS`.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: INVALID_TRANSITION
+                message: Solo una cita CONFIRMED puede marcarse como NO_SHOW.
+
+components:
+  schemas:
+    AppointmentStatus:
+      type: string
+      description: Estado del ciclo de vida de la cita — ver diagrama en `info.description`.
+      enum: [PENDING, CONFIRMED, IN_PROGRESS, COMPLETED, CANCELLED, NO_SHOW]
+
+    # ─── Request schemas ────────────────────────────────────────────────
+    BookAppointmentRequest:
+      type: object
+      description: |
+        Datos para reservar una cita. No incluye `barbershopId` (se deriva del token) ni
+        `priceAtBooking`/`status` (los calcula el servidor — INV-APPT-002).
+      additionalProperties: false
+      required:
+        - barberId
+        - serviceId
+        - date
+        - startTime
+      properties:
+        barberId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        serviceId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        clientId:
+          allOf:
+            - $ref: './_shared.yaml#/components/schemas/UUID'
+          nullable: true
+          description: Nulo cuando la reserva la crea el staff como walk-in.
+        date:
+          type: string
+          format: date
+          description: No puede ser una fecha pasada.
+        startTime:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          description: Hora local de la barbería, formato `HH:mm`. `endTime` lo deriva el servidor de la duración del servicio.
+          example: '14:30'
+
+    CancelAppointmentRequest:
+      type: object
+      description: Cuerpo opcional de la cancelación.
+      properties:
+        reason:
+          type: string
+          maxLength: 255
+          description: Motivo de la cancelación, informativo.
+
+    # ─── Response schemas ───────────────────────────────────────────────
+    Appointment:
+      description: Representación completa de una cita.
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/AuditFields'
+        - type: object
+          required:
+            - id
+            - barberId
+            - serviceId
+            - date
+            - startTime
+            - endTime
+            - status
+            - priceAtBooking
+          properties:
+            id:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            clientId:
+              allOf:
+                - $ref: './_shared.yaml#/components/schemas/UUID'
+              nullable: true
+              description: Nulo en una cita de walk-in creada por el staff.
+            barberId:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            serviceId:
+              $ref: './_shared.yaml#/components/schemas/UUID'
+            date:
+              type: string
+              format: date
+            startTime:
+              type: string
+              example: '14:30'
+            endTime:
+              type: string
+              description: Derivado de `startTime` + la duración del servicio al momento de la reserva.
+              example: '15:00'
+            status:
+              $ref: '#/components/schemas/AppointmentStatus'
+            priceAtBooking:
+              type: number
+              format: double
+              description: |
+                Snapshot del precio del servicio en el momento de la reserva, en COP.
+                Inmutable tras la creación (INV-APPT-002): no cambia aunque la barbería
+                actualice después el precio del servicio.
+              example: 35000
+
+  securitySchemes:
+    bearerAuth:
+      $ref: './_shared.yaml#/components/securitySchemes/bearerAuth'
