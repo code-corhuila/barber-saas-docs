@@ -6,6 +6,13 @@
 
 ---
 
+> **Scope.** The concrete rules below describe the prototype (`barber-saas`, category A). In the 29
+> category C repositories (`barber-saas-*`) the course norm's service contract prevails: every
+> service validates the JWT itself with **RS256** and the identity service's public key, rejecting
+> any other algorithm (including `none` and `HS256`) and requiring `exp` and `sub` (norm 5.3.7);
+> identifiers are **UUIDs** (norm 5.3.5); lists are paginated with `limit` 1–100, default 20
+> (norm 5.3.6). No service holds the private key or a shared key.
+
 ## OWASP Top 10 — Controls per category
 
 ### A01 — Broken Access Control
