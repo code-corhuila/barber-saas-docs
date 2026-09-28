@@ -217,3 +217,25 @@ architecture decision.
 
 **Closing criterion:** an ADR or `05-architecture/` section picks the composition strategy,
 and the barber and loyalty contracts reference it.
+
+---
+
+## OQ-09 — Circular dependency between schedule and appointment
+
+**Status:** open.
+
+**Evidence:** `schedule-service.yaml`'s `GET /api/v1/availability` subtracts the barber's
+booked appointments (owned by appointment) from the working hours (`DEC-SCHED-03`), while
+`appointment-service.yaml`'s `POST /appointments` must check the requested slot against the
+barber's schedule and exceptions (owned by schedule). In the monolith both lived in one
+process (`AvailabilityService` read `appointments` directly); golden rule 8 now forbids either
+domain from reading the other's database, so each would call the other's `-api`.
+
+**Why it's still open:** breaking the cycle (appointment publishes booking events and schedule
+keeps a busy-slot projection, or `barber-saas-workflow` composes availability) is an
+architecture decision for `05-architecture/`, not for the contracts.
+
+**Responsible:** team — next architecture SPEC round, alongside OQ-08.
+
+**Closing criterion:** a decision records which service owns the availability computation and
+how it learns about bookings, and both contracts reference it.
