@@ -11,7 +11,7 @@
 - Version goes in the URL path: `/api/v1/resources`.
 - The version increments only on a breaking change (removed field, changed type, removed
   endpoint). Additive changes (new optional field, new endpoint) do not require a bump.
-- Since `ADR-004-full-microservice-decomposition.md`, each domain is its own service
+- Since [ADR-004](../05-architecture/decisions/records/ADR-004-full-microservice-decomposition.md), each domain is its own service
   (`barber-saas-<domain>-api`) exposing `/api/v1/<domain-resources>`. The existing contracts
   still use the monolith's role-prefixed paths (`/api/client`, `/api/admin`, …) — aligning
   them is tracked in `open-questions.md` OQ-05.
