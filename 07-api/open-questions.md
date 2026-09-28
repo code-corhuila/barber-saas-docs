@@ -143,3 +143,77 @@ contracts start compliant.
 **Closing criterion:** every contract under `contracts/openapi/` references
 `IdempotencyKeyHeader`, `CorrelationIdHeader`, `PaginatedList`, `Money` and the shared
 responses, and uses no status code outside `guidelines.md`'s table.
+
+---
+
+## OQ-06 — Contracts use UUID and cents; `06-data/models.md` still says BIGINT and DECIMAL
+
+**Status:** open (found 2026-09-28 while writing the five domain contracts).
+
+**Evidence:** `06-data/models.md` ("ID strategy") documents every table as
+`BIGINT AUTO_INCREMENT PRIMARY KEY` and every monetary column (`services.price`,
+`subscription_plans.price`, `finance_records.amount`) as `DECIMAL(10,2)` in COP. The course
+norm (5.3.5) and `guidelines.md` require UUID identifiers and money as integer minor units
+(`priceCents`), and `barbershop-service.yaml`, `schedule-service.yaml`,
+`loyalty-service.yaml`, `finance-inventory-service.yaml` and `platform-admin-service.yaml`
+follow the norm. The monolith's DTOs (`ServiceResponse`, `PlanResponse`,
+`FinanceRecordResponse`) still expose `Long id` and `BigDecimal price`.
+
+**Why it's still open:** the ID/money types are a data-model decision owned by `06-data/`
+(each `-db`), being reworked in parallel with the ADR that adopts UUID. The contracts were not
+bent back to BIGINT/DECIMAL, and 06 was not edited from here.
+
+**Responsible:** Carlos Leal — with the UUID ADR and the per-domain `-db` schemas.
+
+**Closing criterion:** each `-db` schema (and `06-data/models.md`) uses UUID keys and integer
+cents for the columns the contracts expose as `*Cents`, or the contracts are amended to match
+whatever the ADR decides.
+
+---
+
+## OQ-07 — How a `CLIENT` token gets bound to a barbershop
+
+**Status:** open.
+
+**Evidence:** `authentication.md` says the JWT embeds `barbershop_id` for `ADMIN_BARBERSHOP`,
+`BARBER` **and `CLIENT`**, and every tenant-scoped contract (appointment, barbershop,
+schedule, loyalty) resolves the tenant from the token. But `06-data/models.md` stores
+`users.barbershop_id = NULL` for `CLIENT` (a client is platform-wide and can visit several
+barbershops), and the monolith passed the barbershop explicitly in client paths
+(`/api/client/loyalty/{barbershopId}`, `/api/public/barbershops/{barbershopId}/services`).
+`barbershop-service.yaml` keeps an anonymous discovery catalog under
+`/api/v1/barbershops/{id}` (`DEC-SHOP-02`) for the step before a client picks a shop.
+
+**Why it's still open:** choosing between "one token per selected barbershop" (a tenant
+selection call in identity-auth) and "a claim listing the client's barbershops" changes
+`auth-service.yaml` and `authentication.md`; that is an identity-auth decision, not a detail
+of these contracts.
+
+**Responsible:** team — identity-auth owner.
+
+**Closing criterion:** `authentication.md` states how a `CLIENT` token carries its
+barbershop, and `auth-service.yaml` exposes the call that issues it.
+
+---
+
+## OQ-08 — Barber name and photo live in another domain
+
+**Status:** open.
+
+**Evidence:** the monolith's `BarberPublicResponse` joins `barber_profiles` with `users` to
+return `fullName` and `profilePhotoUrl`. With ADR-004 `users` belongs to identity-auth and
+`barber_profiles` to barbershop, and golden rule 8 forbids one domain from querying another's
+database, so `barbershop-service.yaml`'s `BarberProfile` exposes only `userId`
+(`DEC-SHOP-04`). The same applies to the monolith's loyalty client search
+(`/api/admin/loyalty/clients/search`) and the employee/commission/payroll endpoints
+(`EmployeeController`), which read `users` and are not in any of the five new contracts;
+`commission_percentage` doesn't exist in `06-data/models.md` either.
+
+**Why it's still open:** the composition strategy (the `-app` calls both services, the
+workflow composes, or barbershop keeps a read replica fed by an identity-auth event) is an
+architecture decision.
+
+**Responsible:** team — next architecture SPEC round.
+
+**Closing criterion:** an ADR or `05-architecture/` section picks the composition strategy,
+and the barber and loyalty contracts reference it.

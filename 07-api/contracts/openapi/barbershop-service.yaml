@@ -1,0 +1,984 @@
+openapi: 3.1.0
+info:
+  title: barber-saas-barbershop-api
+  version: 1.0.0
+  license:
+    name: MIT
+    identifier: MIT
+  description: |
+    Servicio del dominio **barbershop** (`barber-saas-barbershop-api`, ADR-004): la barbería
+    como tenant, su catálogo de servicios, los perfiles de sus barberos y sus especialidades.
+
+    **Origen ascendente:** FR-005 (catálogo de servicios, HU-SHOP-001), FR-023 (listado de
+    barberías), FR-027/FR-028 (aislamiento de tenant, HU-TENANT-001). Tablas de
+    `06-data/models.md` § "Barbershop Management": `barbershops`, `services`,
+    `barber_profiles`, `barber_specialties`. Rutas y campos alineados con los controladores
+    reales del monolito (`BarberServiceController`, `BarbershopPublicController`,
+    `BarberProfilePublicController`) en `code-corhuila/barber-saas@develop`.
+
+    ## Autenticación
+    JWT Bearer (`_shared.yaml#/components/securitySchemes/bearerAuth`). `barbershopId` se
+    deriva del token vía `TenantContext` (`authentication.md`, "Multi-tenancy"): **ninguna
+    operación autenticada lo recibe en query, path ni body.** Los recursos de otra barbería
+    responden `404` (ver `DEC-SHOP-01`).
+
+    ## Roles
+    | Rol | Qué puede hacer aquí |
+    |---|---|
+    | `SUPER_ADMIN` | Nada en este contrato: el alta, suspensión y plan de una barbería se operan desde `platform-admin-service.yaml` |
+    | `ADMIN_BARBERSHOP` | Editar su barbería (`/barbershops/me`), gestionar el catálogo de servicios, los perfiles de barbero y sus especialidades |
+    | `BARBER` | Leer su barbería y el catálogo; editar **su propio** perfil y especialidades |
+    | `CLIENT` | Leer la barbería de su token, su catálogo activo y sus barberos |
+    | anónimo | Solo el catálogo público de descubrimiento (`DEC-SHOP-02`) |
+
+    ## Decisiones de diseño de este contrato
+
+    ### DEC-SHOP-01 · El 404 no distingue "no existe" de "es de otra barbería"
+    Mismo criterio que `DEC-APPT-01` en `appointment-service.yaml`: confirmar que un `id` de
+    otra barbería existe sería una fuga entre tenants (`INV-APPT-005`, FR-028).
+
+    ### DEC-SHOP-02 · El catálogo público identifica la barbería por su propio `id`
+    `GET /api/v1/barbershops/{id}` y sus sub-recursos `/services` y `/barbers` son
+    **lecturas anónimas de descubrimiento** (el cliente aún no tiene token ligado a una
+    barbería). Ahí `{id}` es el recurso que se consulta, no el contexto de tenant: solo
+    devuelven barberías `ACTIVE`/`TRIAL`, servicios activos y datos no sensibles, y ninguna
+    operación de escritura acepta un `barbershopId`. Cómo pasa un `CLIENT` de este catálogo a
+    un token ligado a una barbería queda abierto en `open-questions.md` OQ-07.
+
+    ### DEC-SHOP-03 · `status` y `planId` no se editan aquí
+    `UpdateMyBarbershopRequest` usa `additionalProperties: false`: enviar `status` o `planId`
+    responde `400`. Solo `SUPER_ADMIN` cambia el estado (`INV-SHOP-002`) y asigna el plan
+    (`INV-SHOP-003`), desde `platform-admin-service.yaml`.
+
+    ### DEC-SHOP-04 · El perfil no incluye nombre ni foto del barbero
+    `fullName` y `profilePhotoUrl` viven en `users` (dominio identity-auth); este servicio
+    solo consulta su propia base (regla de oro 8). El monolito los unía con un JOIN; aquí se
+    exponen solo los campos de `barber_profiles`. La composición queda abierta en OQ-08.
+
+servers:
+  - url: http://localhost:8080
+    description: api-gateway local (única entrada, norma 5.6.1) — las rutas incluyen `/api/v1`
+  - url: https://api.dev.{domain}
+    description: api-gateway del entorno de desarrollo
+    variables:
+      domain:
+        default: example.com
+  - url: https://api.{domain}
+    description: api-gateway de producción
+    variables:
+      domain:
+        default: example.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Barbershops
+    description: La barbería (tenant) y su catálogo público de descubrimiento
+  - name: Services
+    description: Catálogo de servicios que ofrece la barbería (tabla `services`)
+  - name: Barbers
+    description: Perfiles de barbero y especialidades (`barber_profiles`, `barber_specialties`)
+  - name: Health
+    description: Health check del servicio
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Sonda interna para `barber-saas-infra`; no se publica en el api-gateway.
+      operationId: healthCheck
+      tags: [Health]
+      security: []
+      servers:
+        - url: http://barber-saas-barbershop-api:8080
+          description: Red interna de compose
+      responses:
+        '200':
+          description: Servicio saludable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          $ref: './_shared.yaml#/components/responses/ServiceUnavailable'
+
+  # ─── Barbershops ────────────────────────────────────────────────────────
+  /api/v1/barbershops:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Buscar barberías visibles (público)
+      description: |
+        Catálogo anónimo de descubrimiento (`DEC-SHOP-02`). Solo barberías `ACTIVE` o `TRIAL`
+        (una barbería en prueba debe poder recibir clientes). Si llegan `lat` y `lng`, ordena
+        por cercanía aproximada; si no, por más reciente primero.
+      operationId: searchBarbershops
+      tags: [Barbershops]
+      security: []
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - name: city
+          in: query
+          description: Ciudad exacta, sin distinguir mayúsculas
+          schema:
+            type: string
+            maxLength: 80
+        - name: lat
+          in: query
+          description: Latitud del cliente; debe llegar junto con `lng`
+          schema:
+            type: number
+            minimum: -90
+            maximum: 90
+        - name: lng
+          in: query
+          description: Longitud del cliente; debe llegar junto con `lat`
+          schema:
+            type: number
+            minimum: -180
+            maximum: 180
+      responses:
+        '200':
+          description: Página de barberías visibles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BarbershopPage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/barbershops/me:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Ver la barbería del token
+      description: 'Roles: `ADMIN_BARBERSHOP`, `BARBER`, `CLIENT`. La barbería es la del `TenantContext`.'
+      operationId: getMyBarbershop
+      tags: [Barbershops]
+      responses:
+        '200':
+          description: Barbería del token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Barbershop'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          description: '`SUPER_ADMIN` no está ligado a una barbería.'
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+    patch:
+      summary: Editar los datos de mi barbería
+      description: |
+        Rol: `ADMIN_BARBERSHOP`. Actualización parcial. `status` y `planId` se rechazan con
+        `400` (`DEC-SHOP-03`).
+      operationId: updateMyBarbershop
+      tags: [Barbershops]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMyBarbershopRequest'
+            example:
+              phone: '+573001112233'
+              cancellationPolicyHours: 4
+      responses:
+        '200':
+          description: Barbería actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Barbershop'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/barbershops/{id}:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Detalle público de una barbería
+      description: Lectura anónima (`DEC-SHOP-02`). Una barbería `SUSPENDED` o `CANCELLED` responde `404`.
+      operationId: getBarbershopById
+      tags: [Barbershops]
+      security: []
+      responses:
+        '200':
+          description: Barbería encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Barbershop'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/barbershops/{id}/services:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Servicios activos de una barbería (público)
+      description: Lectura anónima (`DEC-SHOP-02`). Solo servicios con `isActive = true`.
+      operationId: listPublicServices
+      tags: [Barbershops]
+      security: []
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Página de servicios activos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServicePage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/barbershops/{id}/barbers:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Barberos de una barbería (público)
+      description: Lectura anónima (`DEC-SHOP-02`). Sin nombre ni foto (`DEC-SHOP-04`).
+      operationId: listPublicBarbers
+      tags: [Barbershops]
+      security: []
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Página de perfiles de barbero
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BarberProfilePage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  # ─── Services ───────────────────────────────────────────────────────────
+  /api/v1/services:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Listar servicios de mi barbería
+      description: |
+        Roles: `ADMIN_BARBERSHOP` (activos e inactivos), `BARBER` y `CLIENT` (solo activos; el
+        servidor ignora `isActive=false` para estos roles).
+      operationId: listServices
+      tags: [Services]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - name: isActive
+          in: query
+          description: Filtrar por estado de activación (solo `ADMIN_BARBERSHOP` ve inactivos)
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Página de servicios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServicePage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+    post:
+      summary: Crear un servicio
+      description: |
+        Rol: `ADMIN_BARBERSHOP` (FR-005, HU-SHOP-001 escenario 1). Queda ligado al
+        `barbershopId` del token y activo.
+      operationId: createService
+      tags: [Services]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateServiceRequest'
+            example:
+              name: Corte clásico
+              description: Corte con máquina y tijera
+              durationMinutes: 30
+              priceCents: 2500000
+      responses:
+        '201':
+          description: Servicio creado
+          headers:
+            Location:
+              $ref: './_shared.yaml#/components/headers/Location'
+            X-Correlation-Id:
+              $ref: './_shared.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+        '200':
+          description: Reintento con el mismo `Idempotency-Key`; devuelve el servicio ya creado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/services/{id}:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Obtener un servicio
+      description: 'Roles: `ADMIN_BARBERSHOP`, `BARBER`, `CLIENT` (estos dos, solo si está activo).'
+      operationId: getServiceById
+      tags: [Services]
+      responses:
+        '200':
+          description: Servicio encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+    put:
+      summary: Editar un servicio (incluye activar/desactivar)
+      description: |
+        Rol: `ADMIN_BARBERSHOP`. Reemplaza nombre, descripción, duración y precio, y permite
+        activar o desactivar con `isActive` (el monolito lo hacía con `PATCH .../toggle`).
+        Desactivar no borra: las citas históricas siguen resolviendo el `serviceId`
+        (`data-dictionary.md`, "Deletion model"). Cambiar `priceCents` no altera citas ya
+        reservadas (`INV-APPT-002`).
+      operationId: updateService
+      tags: [Services]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateServiceRequest'
+      responses:
+        '200':
+          description: Servicio actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  # ─── Barbers ────────────────────────────────────────────────────────────
+  /api/v1/barbers:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Listar perfiles de barbero de mi barbería
+      description: 'Roles: `ADMIN_BARBERSHOP`, `BARBER`, `CLIENT`.'
+      operationId: listBarbers
+      tags: [Barbers]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - name: specialty
+          in: query
+          description: Filtrar por nombre exacto de especialidad
+          schema:
+            type: string
+            maxLength: 80
+      responses:
+        '200':
+          description: Página de perfiles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BarberProfilePage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+    post:
+      summary: Crear el perfil de barbero de un usuario
+      description: |
+        Rol: `ADMIN_BARBERSHOP`. El usuario (`userId`) ya existe en identity-auth con rol
+        `BARBER` y pertenece a la misma barbería del token (regla del `BarberProfile` en
+        `entities-and-rules.md`). Un usuario tiene como máximo un perfil (`user_id UNIQUE`).
+      operationId: createBarberProfile
+      tags: [Barbers]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBarberProfileRequest'
+      responses:
+        '201':
+          description: Perfil creado
+          headers:
+            Location:
+              $ref: './_shared.yaml#/components/headers/Location'
+            X-Correlation-Id:
+              $ref: './_shared.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BarberProfile'
+        '200':
+          description: Reintento con el mismo `Idempotency-Key`; devuelve el perfil ya creado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BarberProfile'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          description: El `userId` no existe o es de otra barbería (`DEC-SHOP-01`).
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '422':
+          description: |
+            El usuario no tiene rol `BARBER`, o ya tiene un perfil (`user_id UNIQUE`).
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: BUSINESS_RULE_VIOLATION
+                message: El usuario ya tiene un perfil de barbero.
+                traceId: 550e8400-e29b-41d4-a716-446655440000
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/barbers/{id}:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Obtener un perfil de barbero
+      description: 'Roles: `ADMIN_BARBERSHOP`, `BARBER`, `CLIENT`.'
+      operationId: getBarberProfileById
+      tags: [Barbers]
+      responses:
+        '200':
+          description: Perfil encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BarberProfile'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+    patch:
+      summary: Editar un perfil de barbero
+      description: |
+        Roles: `ADMIN_BARBERSHOP` (cualquier perfil de su barbería) y `BARBER` (solo el suyo:
+        `userId` del perfil = `sub` del token). `ratingAvg`/`ratingCount` son de solo lectura y
+        se rechazan con `400`.
+      operationId: updateBarberProfile
+      tags: [Barbers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBarberProfileRequest'
+      responses:
+        '200':
+          description: Perfil actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BarberProfile'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          description: Un `BARBER` intenta editar el perfil de otro barbero.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/barbers/{id}/specialties:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Listar especialidades de un barbero
+      description: 'Roles: `ADMIN_BARBERSHOP`, `BARBER`, `CLIENT`.'
+      operationId: listBarberSpecialties
+      tags: [Barbers]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Página de especialidades
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BarberSpecialtyPage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+    post:
+      summary: Agregar una especialidad a un barbero
+      description: 'Roles: `ADMIN_BARBERSHOP` y `BARBER` (solo a su propio perfil).'
+      operationId: addBarberSpecialty
+      tags: [Barbers]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBarberSpecialtyRequest'
+            example:
+              specialtyName: Barba con toalla caliente
+      responses:
+        '201':
+          description: Especialidad agregada
+          headers:
+            Location:
+              $ref: './_shared.yaml#/components/headers/Location'
+            X-Correlation-Id:
+              $ref: './_shared.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BarberSpecialty'
+        '200':
+          description: Reintento con el mismo `Idempotency-Key`; devuelve la especialidad ya creada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BarberSpecialty'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/barbers/{id}/specialties/{specialtyId}:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - name: specialtyId
+        in: path
+        required: true
+        description: Id de la especialidad (UUID)
+        schema:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    delete:
+      summary: Quitar una especialidad
+      description: 'Roles: `ADMIN_BARBERSHOP` y `BARBER` (solo de su propio perfil). Borrado físico: la tabla no tiene `is_active`.'
+      operationId: removeBarberSpecialty
+      tags: [Barbers]
+      responses:
+        '204':
+          description: Especialidad eliminada
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        timestamp:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+
+    BarbershopStatus:
+      type: string
+      description: |
+        Enum de `barbershops.status` (06). Ciclo de vida y transiciones en
+        `platform-admin-service.yaml`; aquí es de solo lectura.
+      enum: [TRIAL, ACTIVE, SUSPENDED, CANCELLED]
+
+    # ─── Barbershop ─────────────────────────────────────────────────────
+    Barbershop:
+      type: object
+      description: Tabla `barbershops`.
+      required: [id, name, city, status, timezone, cancellationPolicyHours, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        name:
+          type: string
+          maxLength: 120
+          example: Barbería El Clásico
+        address:
+          type: [string, 'null']
+          maxLength: 255
+        city:
+          type: string
+          maxLength: 80
+          example: Neiva
+        latitude:
+          type: [number, 'null']
+          minimum: -90
+          maximum: 90
+          example: 2.9273
+        longitude:
+          type: [number, 'null']
+          minimum: -180
+          maximum: 180
+          example: -75.2819
+        phone:
+          type: [string, 'null']
+          maxLength: 20
+        whatsappNumber:
+          type: [string, 'null']
+          maxLength: 20
+        logoUrl:
+          type: [string, 'null']
+          format: uri
+          maxLength: 255
+        status:
+          $ref: '#/components/schemas/BarbershopStatus'
+        planId:
+          description: Plan de suscripción asignado (`subscription_plans`, dominio platform-admin). Nulo si no tiene.
+          oneOf:
+            - $ref: './_shared.yaml#/components/schemas/UUID'
+            - type: 'null'
+        timezone:
+          type: string
+          maxLength: 50
+          default: America/Bogota
+          description: Zona horaria IANA contra la que se interpretan fechas y horas de citas y horarios.
+        cancellationPolicyHours:
+          type: integer
+          minimum: 0
+          default: 2
+          description: Horas antes de la cita en que un `CLIENT` aún puede cancelar (`INV-APPT-003`).
+        createdAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+
+    UpdateMyBarbershopRequest:
+      type: object
+      description: Actualización parcial. Sin `status` ni `planId` (`DEC-SHOP-03`).
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        address:
+          type: [string, 'null']
+          maxLength: 255
+        city:
+          type: string
+          minLength: 1
+          maxLength: 80
+        latitude:
+          type: [number, 'null']
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: [number, 'null']
+          minimum: -180
+          maximum: 180
+        phone:
+          type: string
+          maxLength: 20
+        whatsappNumber:
+          type: [string, 'null']
+          maxLength: 20
+        logoUrl:
+          type: [string, 'null']
+          format: uri
+          maxLength: 255
+        timezone:
+          type: string
+          maxLength: 50
+        cancellationPolicyHours:
+          type: integer
+          minimum: 0
+
+    BarbershopPage:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/PaginatedList'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Barbershop'
+
+    # ─── Service ────────────────────────────────────────────────────────
+    Service:
+      type: object
+      description: Tabla `services`. No tiene `updated_at` en 06.
+      required: [id, name, durationMinutes, priceCents, isActive, createdAt]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        name:
+          type: string
+          maxLength: 100
+          example: Corte clásico
+        description:
+          type: [string, 'null']
+          maxLength: 255
+        durationMinutes:
+          type: integer
+          minimum: 5
+          example: 30
+        priceCents:
+          $ref: './_shared.yaml#/components/schemas/Money'
+          description: Precio vigente en centavos de COP (`services.price`). Ver OQ-06.
+        isActive:
+          type: boolean
+        createdAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+
+    CreateServiceRequest:
+      type: object
+      additionalProperties: false
+      required: [name, durationMinutes, priceCents]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: [string, 'null']
+          maxLength: 255
+        durationMinutes:
+          type: integer
+          minimum: 5
+          description: Mínimo 5 minutos (validación de `ServiceRequest` en el monolito).
+        priceCents:
+          $ref: './_shared.yaml#/components/schemas/Money'
+
+    UpdateServiceRequest:
+      type: object
+      additionalProperties: false
+      required: [name, durationMinutes, priceCents]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: [string, 'null']
+          maxLength: 255
+        durationMinutes:
+          type: integer
+          minimum: 5
+        priceCents:
+          $ref: './_shared.yaml#/components/schemas/Money'
+        isActive:
+          type: boolean
+          description: Si se omite, conserva el valor actual.
+
+    ServicePage:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/PaginatedList'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Service'
+
+    # ─── Barber profile ─────────────────────────────────────────────────
+    BarberProfile:
+      type: object
+      description: Tabla `barber_profiles` con sus `barber_specialties`. Sin `fullName` ni foto (`DEC-SHOP-04`).
+      required: [id, userId, experienceYears, ratingAvg, ratingCount, specialties]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        userId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        experienceYears:
+          type: integer
+          minimum: 0
+          default: 0
+        bio:
+          type: [string, 'null']
+          maxLength: 500
+        ratingAvg:
+          type: number
+          minimum: 0
+          maximum: 5
+          readOnly: true
+          description: Promedio de reseñas (`rating_avg DECIMAL(3,2)`); lo mantiene el servidor.
+          example: 4.75
+        ratingCount:
+          type: integer
+          minimum: 0
+          readOnly: true
+        specialties:
+          type: array
+          items:
+            $ref: '#/components/schemas/BarberSpecialty'
+
+    CreateBarberProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [userId]
+      properties:
+        userId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        experienceYears:
+          type: integer
+          minimum: 0
+        bio:
+          type: [string, 'null']
+          maxLength: 500
+
+    UpdateBarberProfileRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        experienceYears:
+          type: integer
+          minimum: 0
+        bio:
+          type: [string, 'null']
+          maxLength: 500
+
+    BarberProfilePage:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/PaginatedList'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/BarberProfile'
+
+    # ─── Barber specialty ───────────────────────────────────────────────
+    BarberSpecialty:
+      type: object
+      description: Tabla `barber_specialties`.
+      required: [id, barberProfileId, specialtyName]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        barberProfileId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        specialtyName:
+          type: string
+          maxLength: 80
+          example: Fade
+
+    CreateBarberSpecialtyRequest:
+      type: object
+      additionalProperties: false
+      required: [specialtyName]
+      properties:
+        specialtyName:
+          type: string
+          minLength: 1
+          maxLength: 80
+
+    BarberSpecialtyPage:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/PaginatedList'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/BarberSpecialty'
+
+  securitySchemes:
+    bearerAuth:
+      $ref: './_shared.yaml#/components/securitySchemes/bearerAuth'
