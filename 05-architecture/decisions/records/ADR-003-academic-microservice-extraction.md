@@ -2,7 +2,7 @@
 
 - **ID:** ADR-003
 - **Date:** 2026-09-03
-- **Status:** Accepted
+- **Status:** Superseded by ADR-004 (2026-09-20)
 - **Authors:** Carlos Mauricio Leal Medina, Daniel Felipe Cerquera Idrobo, Juan Pablo Borrero Morales, Carolay Arraut Heredia
 
 ---
@@ -124,3 +124,7 @@ measured trigger because of this ADR.
 - `02-domain/domain-map.md` — Notifications bounded context classification (Generic) and
   the anticipated event-driven note
 - Course syllabus (Sistemas Distribuidos, 2026-B) — weeks 2, 5-6, 7
+- **Superseded by:** `ADR-004-full-microservice-decomposition.md` — the course requirement
+  moved from "one scoped exception" to full microservice decomposition, which this ADR's own
+  Risks table anticipated as a possibility ("the instructor specifies a different module or
+  timeline than assumed here").
