@@ -156,3 +156,143 @@ contracts start compliant.
 **Closing criterion:** every contract under `contracts/openapi/` references
 `IdempotencyKeyHeader`, `CorrelationIdHeader`, `PaginatedList`, `Money` and the shared
 responses, and uses no status code outside `guidelines.md`'s table.
+
+---
+
+## OQ-06 — Contracts use UUID and cents; `06-data/models.md` still says BIGINT and DECIMAL
+
+**Status:** open (found 2026-09-28 while writing the five domain contracts).
+
+**Evidence:** `06-data/models.md` ("ID strategy") documents every table as
+`BIGINT AUTO_INCREMENT PRIMARY KEY` and every monetary column (`services.price`,
+`subscription_plans.price`, `finance_records.amount`) as `DECIMAL(10,2)` in COP. The course
+norm (5.3.5) and `guidelines.md` require UUID identifiers and money as integer minor units
+(`priceCents`), and `barbershop-service.yaml`, `schedule-service.yaml`,
+`loyalty-service.yaml`, `finance-inventory-service.yaml` and `platform-admin-service.yaml`
+follow the norm. The monolith's DTOs (`ServiceResponse`, `PlanResponse`,
+`FinanceRecordResponse`) still expose `Long id` and `BigDecimal price`.
+
+**Why it's still open:** the ID/money types are a data-model decision owned by `06-data/`
+(each `-db`), being reworked in parallel with the ADR that adopts UUID. The contracts were not
+bent back to BIGINT/DECIMAL, and 06 was not edited from here.
+
+**Responsible:** Carlos Leal — with the UUID ADR and the per-domain `-db` schemas.
+
+**Closing criterion:** each `-db` schema (and `06-data/models.md`) uses UUID keys and integer
+cents for the columns the contracts expose as `*Cents`, or the contracts are amended to match
+whatever the ADR decides.
+
+---
+
+## OQ-07 — How a `CLIENT` token gets bound to a barbershop
+
+**Status:** open.
+
+**Evidence:** `authentication.md` says the JWT embeds `barbershop_id` for `ADMIN_BARBERSHOP`,
+`BARBER` **and `CLIENT`**, and every tenant-scoped contract (appointment, barbershop,
+schedule, loyalty) resolves the tenant from the token. But `06-data/models.md` stores
+`users.barbershop_id = NULL` for `CLIENT` (a client is platform-wide and can visit several
+barbershops), and the monolith passed the barbershop explicitly in client paths
+(`/api/client/loyalty/{barbershopId}`, `/api/public/barbershops/{barbershopId}/services`).
+`barbershop-service.yaml` keeps an anonymous discovery catalog under
+`/api/v1/barbershops/{id}` (`DEC-SHOP-02`) for the step before a client picks a shop.
+
+**Why it's still open:** choosing between "one token per selected barbershop" (a tenant
+selection call in identity-auth) and "a claim listing the client's barbershops" changes
+`auth-service.yaml` and `authentication.md`; that is an identity-auth decision, not a detail
+of these contracts.
+
+**Responsible:** team — identity-auth owner.
+
+**Closing criterion:** `authentication.md` states how a `CLIENT` token carries its
+barbershop, and `auth-service.yaml` exposes the call that issues it.
+
+---
+
+## OQ-08 — Barber name and photo live in another domain
+
+**Status:** open.
+
+**Evidence:** the monolith's `BarberPublicResponse` joins `barber_profiles` with `users` to
+return `fullName` and `profilePhotoUrl`. With ADR-004 `users` belongs to identity-auth and
+`barber_profiles` to barbershop, and golden rule 8 forbids one domain from querying another's
+database, so `barbershop-service.yaml`'s `BarberProfile` exposes only `userId`
+(`DEC-SHOP-04`). The same applies to the monolith's loyalty client search
+(`/api/admin/loyalty/clients/search`) and the employee/commission/payroll endpoints
+(`EmployeeController`), which read `users` and are not in any of the five new contracts;
+`commission_percentage` doesn't exist in `06-data/models.md` either.
+
+**Why it's still open:** the composition strategy (the `-app` calls both services, the
+workflow composes, or barbershop keeps a read replica fed by an identity-auth event) is an
+architecture decision.
+
+**Responsible:** team — next architecture SPEC round.
+
+**Closing criterion:** an ADR or `05-architecture/` section picks the composition strategy,
+and the barber and loyalty contracts reference it.
+
+---
+
+## OQ-09 — Circular dependency between schedule and appointment
+
+**Status:** open.
+
+**Evidence:** `schedule-service.yaml`'s `GET /api/v1/availability` subtracts the barber's
+booked appointments (owned by appointment) from the working hours (`DEC-SCHED-03`), while
+`appointment-service.yaml`'s `POST /appointments` must check the requested slot against the
+barber's schedule and exceptions (owned by schedule). In the monolith both lived in one
+process (`AvailabilityService` read `appointments` directly); golden rule 8 now forbids either
+domain from reading the other's database, so each would call the other's `-api`.
+
+**Why it's still open:** breaking the cycle (appointment publishes booking events and schedule
+keeps a busy-slot projection, or `barber-saas-workflow` composes availability) is an
+architecture decision for `05-architecture/`, not for the contracts.
+
+**Responsible:** team — next architecture SPEC round, alongside OQ-08.
+
+**Closing criterion:** a decision records which service owns the availability computation and
+how it learns about bookings, and both contracts reference it.
+
+---
+
+## OQ-10 — platform-admin changes rows that barbershop owns
+
+**Status:** open.
+
+**Evidence:** `platform-admin-service.yaml` creates barbershops, changes their `status` and
+assigns their `planId`, but `barbershops` is barbershop's table (`06-data/models.md` groups it
+under Barbershop Management, and ADR-004 gives each domain its own `-db`). Golden rule 8 forbids
+platform-admin from writing that database, so `DEC-PLAT-01` routes the change through
+`barber-saas-barbershop-api` — an internal, service-to-service interface that no contract
+declares yet. The same applies in reverse to `DEC-PLAT-02`: refusing to deactivate a plan
+still assigned to barbershops needs barbershop's data.
+
+**Why it's still open:** whether this is a synchronous internal endpoint, an event
+(`BarbershopStatusChanged`) or a workflow saga, and how the service authenticates as itself
+(not with a user's token), is an architecture decision.
+
+**Responsible:** team — together with OQ-08 and OQ-09.
+
+**Closing criterion:** the mechanism is recorded in `05-architecture/`, and either
+`barbershop-service.yaml` declares the internal operation or `02-domain/domain-events.md`
+declares the event.
+
+---
+
+## OQ-11 — `trialEndsAt` has no column
+
+**Status:** open (already flagged from the data side in `06-data/models.md`, under
+`barbershops`).
+
+**Evidence:** `INV-SHOP-001` defines `trialEndsAt = createdAt + 60 days`, immutable, and FR-026's
+expiration job needs to query it efficiently. `barbershops` has no `trial_ends_at` column.
+`platform-admin-service.yaml` exposes it as a derived, read-only field (`DEC-PLAT-03`) instead
+of inventing a column.
+
+**Why it's still open:** storing it or keeping it derived is a `06-data/` decision, and FR-026's
+job (in `barber-saas-worker`) doesn't exist yet.
+
+**Responsible:** whoever implements FR-026, with the `barbershop-db` owner.
+
+**Closing criterion:** the barbershop schema either adds `trial_ends_at` or documents the
+derivation, and `DEC-PLAT-03` is updated to match.

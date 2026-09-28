@@ -1,0 +1,738 @@
+openapi: 3.1.0
+info:
+  title: barber-saas-loyalty-api
+  version: 1.0.0
+  license:
+    name: MIT
+    identifier: MIT
+  description: |
+    Servicio del dominio **loyalty** (`barber-saas-loyalty-api`, ADR-004): programa de
+    fidelización por stickers ("puntos"), la recompensa que configura cada barbería y los
+    cupones que se emiten al canjearla.
+
+    **Origen ascendente:** FR-013 (otorgar sticker), FR-014 (rechazar canje sin stickers
+    suficientes), FR-015 (emitir cupón al canjear) y FR-010 (consumir el cupón al reservar),
+    HU-LOY-001 y HU-APPT-001. Tablas de `06-data/models.md` § "Loyalty & Rewards":
+    `loyalty_rewards_config`, `loyalty_cards`, `loyalty_transactions`, `reward_coupons`.
+    Invariantes `INV-LOYAL-001` a `INV-LOYAL-003` y `AGGR-INV-LOYAL-001/002` de
+    `02-domain/entities-and-rules.md`; eventos `StickerGranted`/`RewardRedeemed` de
+    `02-domain/domain-events.md`. Rutas y campos alineados con `LoyaltyController` del
+    monolito (`code-corhuila/barber-saas@develop`).
+
+    ## Autenticación
+    JWT Bearer (`_shared.yaml#/components/securitySchemes/bearerAuth`). `barbershopId` se
+    deriva del token (`TenantContext`); ninguna operación lo recibe. Tarjetas, cupones o
+    clientes de otra barbería responden `404`, igual que los inexistentes (`DEC-APPT-01`).
+
+    ## Roles
+    | Rol | Qué puede hacer aquí |
+    |---|---|
+    | `SUPER_ADMIN` | Nada: no opera la fidelización de una barbería |
+    | `ADMIN_BARBERSHOP` | Configurar la recompensa; otorgar stickers, canjear, consultar tarjetas y cupones de su barbería |
+    | `BARBER` | Otorgar stickers, canjear, consultar tarjetas y cupones de su barbería (`INV-LOYAL-002`) |
+    | `CLIENT` | Ver la configuración, **su** tarjeta, su historial y **sus** cupones; consumir su cupón al reservar |
+
+    ## Decisiones de diseño de este contrato
+
+    ### DEC-LOY-01 · Otorgar y canjear son creaciones, con `Idempotency-Key`
+    Cada sticker o canje escribe una fila en `loyalty_transactions`, el log de solo-agregar
+    del dominio. Por eso son `POST` a colecciones (`/stickers`, `/redemptions`) con
+    `Idempotency-Key` obligatorio (norma 5.3.8): reintentar el mismo otorgamiento no acredita
+    dos veces. Esto aplica la estrategia decidida en `open-questions.md` OQ-02; el caso de un
+    sticker manual sobre una cita que ya generó uno automático sigue abierto allí.
+
+    ### DEC-LOY-02 · El canje es atómico
+    `POST /redemptions` descuenta `stickersRequired`, incrementa `totalRewardsRedeemed`,
+    registra la transacción `REWARD_REDEEMED` y emite exactamente un cupón `ACTIVE` en la
+    misma operación (`INV-LOYAL-003`). La respuesta trae los tres resultados.
+
+    ### DEC-LOY-03 · La tarjeta no se crea por API
+    No hay `POST /cards`: la tarjeta se crea con el primer sticker (FR-013), y hay una por
+    cliente y barbería (`uq_client_barbershop`).
+
+servers:
+  - url: http://localhost:8080
+    description: api-gateway local (única entrada, norma 5.6.1) — las rutas incluyen `/api/v1`
+  - url: https://api.dev.{domain}
+    description: api-gateway del entorno de desarrollo
+    variables:
+      domain:
+        default: example.com
+  - url: https://api.{domain}
+    description: api-gateway de producción
+    variables:
+      domain:
+        default: example.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Rewards config
+    description: Recompensa y umbral de stickers de la barbería (`loyalty_rewards_config`)
+  - name: Cards
+    description: Tarjetas de fidelización y su historial (`loyalty_cards`, `loyalty_transactions`)
+  - name: Stickers and redemptions
+    description: Otorgar stickers y canjear recompensas
+  - name: Coupons
+    description: Cupones emitidos por canje (`reward_coupons`)
+  - name: Health
+    description: Health check del servicio
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Sonda interna para `barber-saas-infra`; no se publica en el api-gateway.
+      operationId: healthCheck
+      tags: [Health]
+      security: []
+      servers:
+        - url: http://barber-saas-loyalty-api:8080
+          description: Red interna de compose
+      responses:
+        '200':
+          description: Servicio saludable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          $ref: './_shared.yaml#/components/responses/ServiceUnavailable'
+
+  # ─── Rewards config ─────────────────────────────────────────────────────
+  /api/v1/loyalty/config:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Ver la configuración de fidelización de mi barbería
+      description: 'Roles: `ADMIN_BARBERSHOP`, `BARBER`, `CLIENT`.'
+      operationId: getLoyaltyConfig
+      tags: [Rewards config]
+      responses:
+        '200':
+          description: Configuración vigente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoyaltyRewardsConfig'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '404':
+          description: La barbería aún no configuró su programa de fidelización.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+    put:
+      summary: Configurar el programa de fidelización
+      description: |
+        Rol: `ADMIN_BARBERSHOP`. Crea la configuración si no existe o la reemplaza. Cambiar
+        `stickersRequired` no altera stickers ya acumulados; aplica al siguiente canje
+        (`data-dictionary.md`: nunca asumir 10 como valor universal).
+      operationId: setLoyaltyConfig
+      tags: [Rewards config]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetLoyaltyRewardsConfigRequest'
+            example:
+              stickersRequired: 8
+              rewardDescription: Corte clásico gratis
+      responses:
+        '200':
+          description: Configuración guardada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoyaltyRewardsConfig'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  # ─── Cards ──────────────────────────────────────────────────────────────
+  /api/v1/loyalty/cards:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Listar tarjetas de fidelización de mi barbería
+      description: 'Roles: `ADMIN_BARBERSHOP`, `BARBER`. Orden: última actualización primero.'
+      operationId: listLoyaltyCards
+      tags: [Cards]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - name: clientId
+          in: query
+          description: Filtrar por cliente
+          schema:
+            $ref: './_shared.yaml#/components/schemas/UUID'
+        - name: canRedeem
+          in: query
+          description: Solo tarjetas que alcanzan (`true`) o no (`false`) el umbral de canje
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Página de tarjetas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoyaltyCardPage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/loyalty/cards/me:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Ver mi tarjeta en la barbería del token
+      description: 'Rol: `CLIENT`. `clientId` = `sub` del token.'
+      operationId: getMyLoyaltyCard
+      tags: [Cards]
+      responses:
+        '200':
+          description: Tarjeta del cliente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoyaltyCard'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          description: El cliente aún no tiene tarjeta en esta barbería (no ha recibido stickers, `DEC-LOY-03`).
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/loyalty/cards/{id}:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Obtener una tarjeta
+      description: 'Roles: `ADMIN_BARBERSHOP`, `BARBER` y `CLIENT` (solo la suya).'
+      operationId: getLoyaltyCardById
+      tags: [Cards]
+      responses:
+        '200':
+          description: Tarjeta encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoyaltyCard'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/loyalty/cards/{id}/transactions:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Historial de stickers y canjes de una tarjeta
+      description: |
+        Roles: `ADMIN_BARBERSHOP`, `BARBER` y `CLIENT` (solo la suya). Log de solo-agregar:
+        `stickersCount` es siempre la suma neta de este historial (`AGGR-INV-LOYAL-001`).
+        Orden: más reciente primero.
+      operationId: listLoyaltyTransactions
+      tags: [Cards]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - name: type
+          in: query
+          description: Filtrar por tipo de movimiento
+          schema:
+            $ref: '#/components/schemas/LoyaltyTransactionType'
+      responses:
+        '200':
+          description: Página de movimientos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoyaltyTransactionPage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  # ─── Stickers and redemptions ───────────────────────────────────────────
+  /api/v1/loyalty/stickers:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    post:
+      summary: Otorgar un sticker a un cliente
+      description: |
+        Roles: `ADMIN_BARBERSHOP`, `BARBER` (FR-013, `INV-LOYAL-002`). Suma 1 a
+        `stickersCount`, registra una transacción `STICKER_EARNED` con
+        `grantedByUserId` = `sub` del token, y crea la tarjeta si es el primer sticker
+        (`DEC-LOY-03`). `appointmentId` es opcional, para auditoría (`DEC-LOY-01`).
+      operationId: grantSticker
+      tags: [Stickers and redemptions]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantStickerRequest'
+            example:
+              clientId: 9b2e4c1a-0d3f-4a7e-8c5b-1f2a3b4c5d6e
+              appointmentId: 1d7c2e9f-6a4b-4c3d-9e8f-7a6b5c4d3e2f
+      responses:
+        '201':
+          description: Sticker otorgado
+          headers:
+            Location:
+              $ref: './_shared.yaml#/components/headers/Location'
+            X-Correlation-Id:
+              $ref: './_shared.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StickerGrantResult'
+        '200':
+          description: Reintento con el mismo `Idempotency-Key`; no acredita de nuevo y devuelve el resultado original.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StickerGrantResult'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          description: El rol no es `ADMIN_BARBERSHOP` ni `BARBER` (`INV-LOYAL-002`).
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '404':
+          description: El cliente o la cita no existen, o son de otra barbería.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/loyalty/redemptions:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    post:
+      summary: Canjear la recompensa de un cliente
+      description: |
+        Roles: `ADMIN_BARBERSHOP`, `BARBER` (FR-014, FR-015, HU-LOY-001 escenarios 2 y 3).
+        Operación atómica (`DEC-LOY-02`, `INV-LOYAL-003`).
+      operationId: redeemReward
+      tags: [Stickers and redemptions]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedeemRewardRequest'
+      responses:
+        '201':
+          description: Recompensa canjeada; se emitió un cupón `ACTIVE`
+          headers:
+            Location:
+              $ref: './_shared.yaml#/components/headers/Location'
+            X-Correlation-Id:
+              $ref: './_shared.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RedemptionResult'
+        '200':
+          description: Reintento con el mismo `Idempotency-Key`; no descuenta de nuevo y devuelve el resultado original.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RedemptionResult'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          description: El cliente no tiene tarjeta en esta barbería, o es de otra barbería.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '422':
+          description: |
+            `stickersCount < stickersRequired` (`INV-LOYAL-001`, FR-014), o la barbería no tiene
+            programa de fidelización activo.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: BUSINESS_RULE_VIOLATION
+                message: El cliente tiene 6 de 8 stickers; aún no puede canjear.
+                traceId: 550e8400-e29b-41d4-a716-446655440000
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  # ─── Coupons ────────────────────────────────────────────────────────────
+  /api/v1/loyalty/coupons:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Listar cupones
+      description: |
+        Roles: `ADMIN_BARBERSHOP`, `BARBER` (todos los de su barbería) y `CLIENT` (solo los
+        suyos; el servidor ignora `clientId`). Reemplaza al `GET .../coupon` del monolito, que
+        solo decía si había uno activo: `?status=ACTIVE` responde lo mismo con el cupón.
+      operationId: listCoupons
+      tags: [Coupons]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - name: clientId
+          in: query
+          description: Filtrar por cliente (solo `ADMIN_BARBERSHOP`/`BARBER`)
+          schema:
+            $ref: './_shared.yaml#/components/schemas/UUID'
+        - name: status
+          in: query
+          description: Filtrar por estado
+          schema:
+            $ref: '#/components/schemas/RewardCouponStatus'
+      responses:
+        '200':
+          description: Página de cupones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RewardCouponPage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/loyalty/coupons/{id}:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Obtener un cupón
+      description: 'Roles: `ADMIN_BARBERSHOP`, `BARBER` y `CLIENT` (solo los suyos).'
+      operationId: getCouponById
+      tags: [Coupons]
+      responses:
+        '200':
+          description: Cupón encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RewardCoupon'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/loyalty/coupons/{id}/use:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    post:
+      summary: Consumir un cupón en una cita (ACTIVE → USED)
+      description: |
+        Roles: `CLIENT` (solo su cupón), `ADMIN_BARBERSHOP`, `BARBER`. Lo invoca el flujo de
+        reserva (FR-010) reenviando el token del llamador. Fija `appointmentId` y `usedAt`;
+        la transición ocurre una sola vez (regla de `RewardCoupon` en `entities-and-rules.md`).
+        La cita debe ser de la misma barbería y del mismo cliente que el cupón.
+      operationId: useCoupon
+      tags: [Coupons]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UseCouponRequest'
+      responses:
+        '200':
+          description: Cupón consumido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RewardCoupon'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '404':
+          description: El cupón o la cita no existen, o son de otra barbería u otro cliente.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '422':
+          description: El cupón ya está `USED`.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: INVALID_STATUS_TRANSITION
+                message: El cupón ya fue usado.
+                traceId: 550e8400-e29b-41d4-a716-446655440000
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        timestamp:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+
+    # ─── Rewards config ─────────────────────────────────────────────────
+    LoyaltyRewardsConfig:
+      type: object
+      description: Tabla `loyalty_rewards_config`.
+      required: [id, stickersRequired, rewardDescription, isActive]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        stickersRequired:
+          type: integer
+          minimum: 1
+          default: 10
+        rewardDescription:
+          type: string
+          maxLength: 255
+          example: Corte clásico gratis
+        isActive:
+          type: boolean
+
+    SetLoyaltyRewardsConfigRequest:
+      type: object
+      additionalProperties: false
+      required: [stickersRequired, rewardDescription]
+      properties:
+        stickersRequired:
+          type: integer
+          minimum: 1
+        rewardDescription:
+          type: string
+          minLength: 1
+          maxLength: 255
+        isActive:
+          type: boolean
+          default: true
+
+    # ─── Cards and transactions ─────────────────────────────────────────
+    LoyaltyCard:
+      type: object
+      description: |
+        Tabla `loyalty_cards`. `stickersRequired`, `canRedeem` y `rewardDescription` se
+        derivan de `loyalty_rewards_config` (misma base). Sin nombre del cliente (OQ-08).
+      required: [id, clientId, stickersCount, totalRewardsRedeemed, lastUpdated, canRedeem]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        clientId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        stickersCount:
+          type: integer
+          minimum: 0
+        totalRewardsRedeemed:
+          type: integer
+          minimum: 0
+          description: Solo aumenta.
+        lastUpdated:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+        stickersRequired:
+          type: [integer, 'null']
+          minimum: 1
+          readOnly: true
+          description: Nulo si la barbería no tiene configuración activa.
+        canRedeem:
+          type: boolean
+          readOnly: true
+          description: '`stickersCount >= stickersRequired` (`INV-LOYAL-001`).'
+        rewardDescription:
+          type: [string, 'null']
+          readOnly: true
+
+    LoyaltyCardPage:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/PaginatedList'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/LoyaltyCard'
+
+    LoyaltyTransactionType:
+      type: string
+      description: Enum de `loyalty_transactions.type` (06).
+      enum: [STICKER_EARNED, REWARD_REDEEMED]
+
+    LoyaltyTransaction:
+      type: object
+      description: Tabla `loyalty_transactions` (solo-agregar; no se edita ni se borra).
+      required: [id, loyaltyCardId, type, grantedByUserId, createdAt]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        loyaltyCardId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        appointmentId:
+          description: Cita relacionada, si la hubo.
+          oneOf:
+            - $ref: './_shared.yaml#/components/schemas/UUID'
+            - type: 'null'
+        type:
+          $ref: '#/components/schemas/LoyaltyTransactionType'
+        grantedByUserId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        createdAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+
+    LoyaltyTransactionPage:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/PaginatedList'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/LoyaltyTransaction'
+
+    # ─── Grant and redeem ───────────────────────────────────────────────
+    GrantStickerRequest:
+      type: object
+      additionalProperties: false
+      required: [clientId]
+      properties:
+        clientId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        appointmentId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+
+    StickerGrantResult:
+      type: object
+      required: [transaction, card]
+      properties:
+        transaction:
+          $ref: '#/components/schemas/LoyaltyTransaction'
+        card:
+          $ref: '#/components/schemas/LoyaltyCard'
+
+    RedeemRewardRequest:
+      type: object
+      additionalProperties: false
+      required: [clientId]
+      properties:
+        clientId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+
+    RedemptionResult:
+      type: object
+      required: [transaction, card, coupon]
+      properties:
+        transaction:
+          $ref: '#/components/schemas/LoyaltyTransaction'
+        card:
+          $ref: '#/components/schemas/LoyaltyCard'
+        coupon:
+          $ref: '#/components/schemas/RewardCoupon'
+
+    # ─── Coupons ────────────────────────────────────────────────────────
+    RewardCouponStatus:
+      type: string
+      description: Enum de `reward_coupons.status` (06). `ACTIVE` → `USED` una sola vez.
+      enum: [ACTIVE, USED]
+
+    RewardCoupon:
+      type: object
+      description: Tabla `reward_coupons`.
+      required: [id, clientId, status, createdAt]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        clientId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        status:
+          $ref: '#/components/schemas/RewardCouponStatus'
+        appointmentId:
+          description: Cita en la que se usó; nulo mientras esté `ACTIVE`.
+          oneOf:
+            - $ref: './_shared.yaml#/components/schemas/UUID'
+            - type: 'null'
+        createdAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+        usedAt:
+          description: Momento del uso; nulo mientras esté `ACTIVE`.
+          oneOf:
+            - $ref: './_shared.yaml#/components/schemas/Timestamp'
+            - type: 'null'
+
+    UseCouponRequest:
+      type: object
+      additionalProperties: false
+      required: [appointmentId]
+      properties:
+        appointmentId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+
+    RewardCouponPage:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/PaginatedList'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/RewardCoupon'
+
+  securitySchemes:
+    bearerAuth:
+      $ref: './_shared.yaml#/components/securitySchemes/bearerAuth'
