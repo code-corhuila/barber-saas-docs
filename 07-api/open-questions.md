@@ -239,3 +239,47 @@ architecture decision for `05-architecture/`, not for the contracts.
 
 **Closing criterion:** a decision records which service owns the availability computation and
 how it learns about bookings, and both contracts reference it.
+
+---
+
+## OQ-10 — platform-admin changes rows that barbershop owns
+
+**Status:** open.
+
+**Evidence:** `platform-admin-service.yaml` creates barbershops, changes their `status` and
+assigns their `planId`, but `barbershops` is barbershop's table (`06-data/models.md` groups it
+under Barbershop Management, and ADR-004 gives each domain its own `-db`). Golden rule 8 forbids
+platform-admin from writing that database, so `DEC-PLAT-01` routes the change through
+`barber-saas-barbershop-api` — an internal, service-to-service interface that no contract
+declares yet. The same applies in reverse to `DEC-PLAT-02`: refusing to deactivate a plan
+still assigned to barbershops needs barbershop's data.
+
+**Why it's still open:** whether this is a synchronous internal endpoint, an event
+(`BarbershopStatusChanged`) or a workflow saga, and how the service authenticates as itself
+(not with a user's token), is an architecture decision.
+
+**Responsible:** team — together with OQ-08 and OQ-09.
+
+**Closing criterion:** the mechanism is recorded in `05-architecture/`, and either
+`barbershop-service.yaml` declares the internal operation or `02-domain/domain-events.md`
+declares the event.
+
+---
+
+## OQ-11 — `trialEndsAt` has no column
+
+**Status:** open (already flagged from the data side in `06-data/models.md`, under
+`barbershops`).
+
+**Evidence:** `INV-SHOP-001` defines `trialEndsAt = createdAt + 60 days`, immutable, and FR-026's
+expiration job needs to query it efficiently. `barbershops` has no `trial_ends_at` column.
+`platform-admin-service.yaml` exposes it as a derived, read-only field (`DEC-PLAT-03`) instead
+of inventing a column.
+
+**Why it's still open:** storing it or keeping it derived is a `06-data/` decision, and FR-026's
+job (in `barber-saas-worker`) doesn't exist yet.
+
+**Responsible:** whoever implements FR-026, with the `barbershop-db` owner.
+
+**Closing criterion:** the barbershop schema either adds `trial_ends_at` or documents the
+derivation, and `DEC-PLAT-03` is updated to match.
