@@ -65,6 +65,39 @@ ADRs are numbered sequentially: ADR-001-short-title.md.
 
 ---
 
+## Framework rules (pillars)
+
+The documentation framework is organized in pillars (see [README](./README.md#governance-framework-pillars)).
+Three rules follow from it and apply to every section:
+
+| Rule | Statement | Example of a violation |
+|---|---|---|
+| **P1 — Upstream traceability** | Every artifact points to its origin in the previous block: a commit or PR → a user story in `04-requirements`; a service → its ADR (`05`), its contract (`07`) and its data model (`06`); a saga → its process flow (`16-bpmn`); a pipeline → its environment (`10`) | a repository without an ADR for its language or database engine |
+| **P2 — Doc–code coherence** | What `06-data`, `07-api`, `08-uml`, `09-microservices` and `12-ux-ui` say matches the published repositories. A divergence is fixed or recorded as a risk in `15-project-control` | a service catalog that describes services that do not exist |
+| **P3 — Governance wraps everything** | Every team convention that the course norm asks to record lives in `00-governance` | a review rule agreed in chat but not written in `git-conventions.md` |
+
+---
+
+## ADR format (course norm 4.2.3)
+
+Every ADR required by the course norm has these sections, with these titles:
+
+| Section | Content |
+|---|---|
+| Context | The problem and the constraints that force a decision |
+| Options | At least two real alternatives, not one option and its caricature |
+| Dominant criterion | The factor that decided: team knowledge, required consistency, operating cost, latency… |
+| Accepted cost | What the chosen option sacrifices, said plainly |
+| Consequences | What changes in the system and what must be watched |
+
+An ADR without a dominant criterion and an accepted cost is a statement, not a decision.
+
+ADRs the norm requires: the language of each service, the database engine and the migration tool of
+each domain, the interface framework (norm 4.2.2), where saga state is persisted (norm 5.8.4), and
+every repository added beyond the mandatory ones — before it is created (norm 4.2.1).
+
+---
+
 ## Owners per section
 
 | Section | Owner | Review frequency |
@@ -116,6 +149,7 @@ Remove them when the document is complete.
 
 ## Correlations
 
+- Course rule on branches and approvals → `00-governance/branching-policy.md`
 - Git conventions → `00-governance/git-conventions.md`
 - Per-microservice documentation standard → `00-governance/microservices-documentation.md`
 - Definition of Done (docs as part of DoD) → `00-governance/definition-of-done.md`

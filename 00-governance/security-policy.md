@@ -113,10 +113,18 @@ security, enabled via `@EnableMethodSecurity` in `SecurityConfig`); there is no 
 ✗ NEVER in committed .env
 ✗ NEVER in logs
 ✗ NEVER in client error messages
+✗ NEVER real values in .env.example — only variable names and placeholders, not even local "dev" values
+✗ NEVER private keys or tokens in any repository (keys/, *.pem); development keys never leave develop
 ✓ Environment variables (injected by the orchestrator)
 ✓ Vault (HashiCorp Vault, AWS Secrets Manager, etc.)
 ✓ Kubernetes Secrets (encrypted with KMS)
 ```
+
+**Course norm:** committing a real secret or credential is a **grave fault** (norm 13) — it requires
+immediate rotation and is sanctioned. The teacher checks the full history with
+`git log -p --all | grep -inE 'password\s*=|secret\s*=|api[_-]?key\s*=|BEGIN (RSA|PRIVATE) KEY'`
+(norm 15.8). Altering or disabling protection rules — including `.github/CODEOWNERS` — is also a
+grave fault: they are never modified.
 
 **Secret rotation:**
 - API keys: every 90 days

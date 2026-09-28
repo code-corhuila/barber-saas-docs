@@ -5,6 +5,28 @@
 
 ---
 
+## Scope — the 29 repositories
+
+The system is built as a polyrepo of 29 mandatory code repositories (norm 4.1: 5 + N × (2 + C),
+with N = 8 domains and C = 1 channel): five cross-cutting repositories (`barber-saas-api-gateway`,
+`-worker`, `-workflow`, `-infra`, `-front`) and three per domain (`barber-saas-<domain>-db`, `-api`,
+`-app`). The documents below live in this repository; each code repository also follows the annex of
+the course norm for its type and has a `README.md` with its purpose, how to run it and what it
+depends on (norm 5.1).
+
+| Repository type | Course norm annex |
+|---|---|
+| `-db` | A (PostgreSQL) or B (MongoDB) |
+| `-api` | C (hexagonal service) |
+| `-worker` | D |
+| `-workflow` | E (sagas) |
+| `-api-gateway` | F |
+| `-infra` | G |
+| `-front`, `-app` | H (the `-app` repositories apply it to the mobile channel) |
+| all code repositories | I (CODEOWNERS, PR template, CI, board tracking) |
+
+---
+
 ## Required structure for each service
 
 Each microservice lives in `09-microservices/services/NN-service-name/` and MUST have:
@@ -15,7 +37,7 @@ Each microservice lives in `09-microservices/services/NN-service-name/` and MUST
 ├── data-model.md     ⭐ REQUIRED before creating migrations
 ├── events.md         ⭐ REQUIRED if the service emits/consumes events
 ├── decisions.md      🔵 RECOMMENDED — internal technical decisions of the service
-└── runbook.md        🟢 REQUIRED before first deploy to staging
+└── runbook.md        🟢 REQUIRED before first deploy to qa
 ```
 
 And its OpenAPI contract in:
@@ -53,8 +75,8 @@ Minimum content (use `_template/service/README.md`):
 Minimum content:
 - ER diagram (Mermaid) of the service's tables
 - Description of each table with its columns, types, constraints, and purpose
-- Justification of the chosen DB engine (PostgreSQL, MongoDB, Redis, etc.)
-- Migration strategy (Flyway, Liquibase, or manual scripts)
+- The database engine (PostgreSQL or MongoDB) and its ADR (norm 4.2.2)
+- The migration tool (Liquibase or Flyway with PostgreSQL; Liquibase with MongoDB) and its ADR — the schema lives only in the domain's `-db` repository, never in the `-api` (norm 5.2.1)
 
 **Rule:** A field whose reason for existing is not obvious MUST have a comment in the diagram.
 
@@ -94,7 +116,7 @@ Recommended format: miniADR (without the full rigor of an architecture ADR):
 
 ## runbook.md — Service operations manual
 
-**When to create it:** Before the first deploy to staging
+**When to create it:** Before the first deploy to `qa`
 **Owner:** Responsible developer + DevOps
 **Update when:** A new operational issue is discovered or a procedure changes
 
@@ -122,11 +144,12 @@ Use the template: `07-api/contracts/openapi/_template-service.yaml`
 
 ## How to add a new microservice
 
-1. Copy `09-microservices/_template/service/` → `09-microservices/services/NN-name/`
-2. Update `09-microservices/service-catalog.md` with the new service's entry
-3. Update `09-microservices/dependency-map.md` (or create it if it doesn't exist)
-4. Copy `07-api/contracts/openapi/_template-service.yaml` → `07-api/contracts/openapi/service-name.yaml`
-5. Create a PR with at least the README.md and the sketched API contract
+1. If it is not one of the 29 mandatory repositories, record an ADR **before** creating it (norm 4.2.1)
+2. Copy `09-microservices/_template/service/` → `09-microservices/services/NN-name/`
+3. Update `09-microservices/service-catalog.md` with the new service's entry
+4. Update `09-microservices/dependency-map.md` (or create it if it doesn't exist)
+5. Copy `07-api/contracts/openapi/_template-service.yaml` → `07-api/contracts/openapi/service-name.yaml`
+6. Create a PR with at least the README.md and the sketched API contract
 
 ---
 
