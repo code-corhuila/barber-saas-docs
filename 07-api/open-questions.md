@@ -7,7 +7,10 @@
 
 ## OQ-01 — No rate limiting contract on `/api/auth/**`
 
-**Status:** open.
+**Status:** partially closed (2026-09-28). The `429 TOO_MANY_REQUESTS` response with
+`Retry-After` now exists in `_shared.yaml#/components/responses/TooManyRequests` and in
+`guidelines.md`'s status table; per course norm 5.6 rate limiting is enforced by
+`barber-saas-api-gateway`. Still open: reference it from `auth-service.yaml`.
 
 **Evidence:** `00-governance/security-rules.md` (line 94) and `05-architecture/overview.md`
 (risk `AT-002`, line 185) already flag brute-force exposure on login as a known risk,
@@ -32,7 +35,10 @@ to `_shared.yaml#/components/responses/` and reference it from `auth-service.yam
 
 ## OQ-02 — `POST /api/admin/loyalty/grant` has no idempotency contract
 
-**Status:** open, known non-drift gap.
+**Status:** open, known non-drift gap. **Strategy decided (2026-09-28):** course norm 5.3.8
+makes the `Idempotency-Key` header mandatory on every creating operation
+(`_shared.yaml#/components/parameters/IdempotencyKeyHeader`). What remains is applying it to
+the loyalty contract once it exists.
 
 **Evidence:** `02-domain/domain-events.md` (lines 113–116) documents this explicitly: the
 manual grant endpoint "is not idempotent against an appointment that already triggered an
@@ -87,3 +93,53 @@ the component name follows from whichever wins.
 polyrepo split, `notification-service.yaml`'s `info.description` names the resulting
 component per `<abbr>-<domain>-<piece>` and a target MVP milestone, and that milestone is
 tracked in `15-project-control/`.
+
+---
+
+## OQ-04 — JWT is signed with HS512; the course norm requires RS256
+
+**Status:** open, conflicts with course norm 5.3.7.
+
+**Evidence:** `authentication.md` documents "HS512 (symmetric, shared-secret HMAC — not
+RS256)", with the secret "shared only between the components that issue and validate
+tokens". Course norm 5.3.7 requires every service to validate the token itself with
+**RS256 and the identity service's public key**, to reject any other algorithm (including
+`none` and `HS256`), to require `exp` and `sub`, and states that **no service holds the
+private key or a shared key**. With ADR-004 every domain is its own service, so a shared
+HS512 secret would have to be copied into each of them.
+
+**Why it's still open:** changing the signing mechanism changes `auth-service.yaml`
+(`/jwks` is already declared there), `authentication.md` and `05-architecture/overview.md`
+(which `authentication.md` names as its source of truth). That is a decision for an ADR,
+not an edit to this file.
+
+**Responsible:** team — ADR in the SPEC round that follows ADR-004.
+
+**Closing criterion:** an ADR adopts RS256 per norm 5.3.7; `authentication.md` and
+`overview.md` describe it; `_shared.yaml`'s `bearerAuth` note stops pointing here.
+
+---
+
+## OQ-05 — Service contracts do not follow the common contract yet
+
+**Status:** open (found 2026-09-28 while aligning `_shared.yaml` with norm 5.3.5–5.3.9).
+
+**Evidence:**
+
+| Contract | Gap |
+|---|---|
+| `appointment-service.yaml` | Answers `409` for state transitions (`confirm`, `start`, `complete`) and double booking — must be `422 INVALID_STATUS_TRANSITION` / `422 BUSINESS_RULE_VIOLATION`; `priceAtBooking` is `type: number` — money must be `schemas/Money` (`priceCents`) |
+| `auth-service.yaml` | Answers `409` for a duplicate email — must be `422 BUSINESS_RULE_VIOLATION` |
+| all four (incl. `_template-service.yaml`) | No `Idempotency-Key` on creating operations; no `X-Correlation-Id` header; `servers` point at a service port instead of the api-gateway; paths still use the monolith's role prefixes |
+| all four | Error examples written before 1.1.0 lack `traceId`, now required by `ErrorResponse` |
+
+**Why it's still open:** each contract is its own change, reviewed with its service's
+owner; bundling them with the shared components would exceed the 400-line PR limit
+(norm 9.2).
+
+**Responsible:** team — one PR per contract, starting with `_template-service.yaml` so new
+contracts start compliant.
+
+**Closing criterion:** every contract under `contracts/openapi/` references
+`IdempotencyKeyHeader`, `CorrelationIdHeader`, `PaginatedList`, `Money` and the shared
+responses, and uses no status code outside `guidelines.md`'s table.

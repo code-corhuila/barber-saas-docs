@@ -1,10 +1,16 @@
 openapi: 3.0.3
 info:
   title: Shared Components
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Schemas y componentes compartidos entre todos los contratos API del proyecto.
     Referencia estos componentes en tus contratos con: $ref: './_shared.yaml#/components/...'
+
+    1.1.0 — adds the common contract required by the course norm 2026-B (numerals
+    5.3.5 to 5.3.9 and 5.6): closed error-code list with `traceId` always present,
+    `Idempotency-Key` and `X-Correlation-Id` headers, money in minor units, the `{data, meta}`
+    list envelope, 422/429/503 responses and RS256 token validation. Every service contract
+    (`-api`, `-workflow`) must use these components instead of redefining them.
 
 components:
   schemas:
@@ -31,16 +37,47 @@ components:
           type: integer
           example: 8
 
+    PaginatedList:
+      type: object
+      description: |
+        List envelope for every collection endpoint (norm 5.3.6). Stable order, most recent
+        first. A contract narrows `data.items` to its own resource with `allOf`.
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items: {}
+        meta:
+          $ref: '#/components/schemas/PaginatedMeta'
+
     # ─── Errores ──────────────────────────────────────────────────────────────
+    ErrorCode:
+      type: string
+      description: |
+        Closed list of error codes (norm 5.3.5). Services use the first seven; the gateway
+        additionally answers TOO_MANY_REQUESTS and SERVICE_UNAVAILABLE (norm 5.6).
+      enum:
+        - VALIDATION_ERROR            # 400
+        - UNAUTHORIZED                # 401
+        - FORBIDDEN                   # 403
+        - NOT_FOUND                   # 404
+        - INVALID_STATUS_TRANSITION   # 422
+        - BUSINESS_RULE_VIOLATION     # 422
+        - INTERNAL_ERROR              # 500
+        - TOO_MANY_REQUESTS           # 429 (gateway)
+        - SERVICE_UNAVAILABLE         # 503 (gateway)
+
     ErrorResponse:
       type: object
-      description: Formato estándar de error para todos los endpoints
-      required: [error, message]
+      description: |
+        Formato estándar de error para todos los endpoints — also for unknown routes and
+        malformed JSON (norm 5.3.5). `traceId` is always present and equals the request's
+        `X-Correlation-Id`. An error never exposes a driver message, a stack trace or an
+        internal host name: the full detail goes to the log with the same `traceId`.
+      required: [error, message, traceId]
       properties:
         error:
-          type: string
-          description: Código de error en SCREAMING_SNAKE_CASE
-          example: VALIDATION_ERROR
+          $ref: '#/components/schemas/ErrorCode'
         message:
           type: string
           description: Mensaje legible por humanos
@@ -59,8 +96,17 @@ components:
                 example: El campo email es requerido
         traceId:
           type: string
-          description: ID de traza para correlacionar con logs
+          description: ID de traza para correlacionar con logs (= X-Correlation-Id)
           example: 550e8400-e29b-41d4-a716-446655440000
+
+    Money:
+      type: integer
+      format: int64
+      minimum: 0
+      description: |
+        Money is an integer in minor units (e.g. `totalCents`), never a floating-point
+        number (norm 5.3.5). Field names carry the unit suffix: `priceCents`, `totalCents`.
+      example: 2500
 
     # ─── Tipos comunes ────────────────────────────────────────────────────────
     UUID:
@@ -71,6 +117,7 @@ components:
     Timestamp:
       type: string
       format: date-time
+      description: RFC 3339, always in UTC (norm 5.3.5)
       example: '2024-01-15T10:30:00Z'
 
     AuditFields:
@@ -113,6 +160,45 @@ components:
       schema:
         $ref: '#/components/schemas/UUID'
 
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Required on every operation that creates (norm 5.3.8). Repeating the request with the
+        same key returns the already-created resource with `200` and creates nothing new; the
+        key and the resource are written in the same transaction. Clients reuse the key while
+        retrying the same intent (norm 5.4.2).
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+
+    CorrelationIdHeader:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: |
+        Reused if received, generated otherwise; returned in the response, written on every
+        JSON log line and used as the error `traceId` (norm 5.3.9).
+      schema:
+        type: string
+
+  # ─── Cabeceras de respuesta ──────────────────────────────────────────────
+  headers:
+    X-Correlation-Id:
+      description: Same value received (or generated) for this request (norm 5.3.9)
+      schema:
+        type: string
+    Location:
+      description: Path of the resource created by a `201` response
+      schema:
+        type: string
+    Retry-After:
+      description: Seconds to wait before retrying after a `429` (norm 5.6)
+      schema:
+        type: integer
+
   # ─── Respuestas reutilizables ────────────────────────────────────────────
   responses:
     BadRequest:
@@ -127,6 +213,7 @@ components:
             details:
               - field: email
                 message: Formato de email inválido
+            traceId: 550e8400-e29b-41d4-a716-446655440000
 
     Unauthorized:
       description: Token de autenticación ausente o inválido
@@ -137,6 +224,7 @@ components:
           example:
             error: UNAUTHORIZED
             message: Token de autenticación requerido
+            traceId: 550e8400-e29b-41d4-a716-446655440000
 
     Forbidden:
       description: El usuario no tiene permisos para esta operación
@@ -147,6 +235,7 @@ components:
           example:
             error: FORBIDDEN
             message: No tienes permisos para realizar esta acción
+            traceId: 550e8400-e29b-41d4-a716-446655440000
 
     NotFound:
       description: El recurso solicitado no existe
@@ -157,6 +246,7 @@ components:
           example:
             error: NOT_FOUND
             message: El recurso solicitado no existe
+            traceId: 550e8400-e29b-41d4-a716-446655440000
 
     InternalError:
       description: Error interno del servidor
@@ -167,6 +257,54 @@ components:
           example:
             error: INTERNAL_ERROR
             message: Error interno del servidor
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    InvalidStatusTransition:
+      description: The domain's state rules forbid this transition (norm 5.3.5)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: INVALID_STATUS_TRANSITION
+            message: The appointment cannot move from CANCELLED to CONFIRMED
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    BusinessRuleViolation:
+      description: Another domain invariant forbids the operation (norm 5.3.5)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: BUSINESS_RULE_VIOLATION
+            message: The barber already has an overlapping appointment
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    TooManyRequests:
+      description: Rate limit exceeded — answered by the api-gateway (norm 5.6)
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/Retry-After'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: TOO_MANY_REQUESTS
+            message: Too many requests, retry later
+            traceId: 550e8400-e29b-41d4-a716-446655440000
+
+    ServiceUnavailable:
+      description: The target service does not respond — answered by the api-gateway (norm 5.6.3)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: SERVICE_UNAVAILABLE
+            message: The service is temporarily unavailable
+            traceId: 550e8400-e29b-41d4-a716-446655440000
 
   # ─── Seguridad ───────────────────────────────────────────────────────────
   securitySchemes:
@@ -177,3 +315,10 @@ components:
       description: |
         Token JWT obtenido del endpoint POST /auth/login del servicio IAM.
         Incluir en el header: Authorization: Bearer <token>
+
+        Target validation per norm 5.3.7: every service validates the token itself (the
+        gateway only checks it is present, 5.6.2) — algorithm exactly RS256 with the identity
+        service's public key, any other `alg` (including `none` and `HS256`) rejected, `exp`
+        and `sub` required. No service holds the private key or a shared secret. The current
+        HS512 mechanism in `authentication.md` does not meet this yet — see
+        `open-questions.md` OQ-04.

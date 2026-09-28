@@ -11,14 +11,35 @@
 - Version goes in the URL path: `/api/v1/resources`.
 - The version increments only on a breaking change (removed field, changed type, removed
   endpoint). Additive changes (new optional field, new endpoint) do not require a bump.
-- BarberSaaS is currently a single modular monolith exposing one version (`v1`) under
-  role-prefixed paths (`/api/public`, `/api/auth`, `/api/client`, `/api/barber`,
-  `/api/admin`, `/api/super-admin`) — see `05-architecture/overview.md` §5 (P5).
-- There is no `api-gateway.yaml` contract under `contracts/openapi/`, and there shouldn't
-  be one yet: SPEC-002 already removed the fictional `01-api-gateway/` component from
-  `09-microservices/service-catalog.md` (no such service exists or is implemented; clients
-  reach the monolith directly). The OpenAPI stub for it was a leftover from the template
-  and was dropped for the same reason, not as an unrelated cleanup.
+- Since `ADR-004-full-microservice-decomposition.md`, each domain is its own service
+  (`barber-saas-<domain>-api`) exposing `/api/v1/<domain-resources>`. The existing contracts
+  still use the monolith's role-prefixed paths (`/api/client`, `/api/admin`, …) — aligning
+  them is tracked in `open-questions.md` OQ-05.
+- **`barber-saas-api-gateway` is the only entry point** (course norm 5.6.1): clients never call
+  a domain service directly, and only the gateway is published to the host. The gateway is
+  NGINX configuration (one routes file per domain), not an OpenAPI contract: its own errors
+  (`401`, `404`, `429`, `503`) use the shared `ErrorResponse`. Services still validate the
+  token themselves (5.6.2).
+
+## Common contract (course norm 5.3.5 – 5.3.9)
+
+Every `-api` and the `-workflow` follow these rules, so a consumer cannot tell which
+language a service is written in. The reusable pieces live in `_shared.yaml`.
+
+| Aspect | Rule | `_shared.yaml` component |
+|---|---|---|
+| Names | JSON in `camelCase` | — |
+| Identifiers | UUID | `schemas/UUID`, `parameters/IdParam` |
+| Money | Integer in minor units, suffix `Cents` (`totalCents`); never floating point | `schemas/Money` |
+| Dates | RFC 3339, UTC | `schemas/Timestamp` |
+| Errors | One envelope `{error, message, details?, traceId}`, also for unknown routes and malformed JSON | `schemas/ErrorResponse`, `schemas/ErrorCode` |
+| Lists | Paginated, `{data, meta}`, stable order (most recent first) | `schemas/PaginatedList`, `PageParam`, `LimitParam` |
+| Creation | `Idempotency-Key` header required (8–128 chars); same key → same resource with `200` | `parameters/IdempotencyKeyHeader` |
+| Correlation | `X-Correlation-Id` reused or generated, returned, logged, used as `traceId` | `parameters/CorrelationIdHeader`, `headers/X-Correlation-Id` |
+| Token | RS256 with the identity service's public key, validated by each service | `securitySchemes/bearerAuth` |
+
+A creation answers `201` with a `Location` header (`headers/Location`) the first time and
+`200` with the same resource on a retry with the same `Idempotency-Key`.
 
 ## Endpoint naming
 
@@ -36,6 +57,8 @@ Offset-based, via the shared parameters `PageParam` and `LimitParam`
 (`_shared.yaml#/components/parameters/`):
 
 - `?page=1&limit=20` — `page` starts at 1, `limit` defaults to 20 with a maximum of 100.
+  A `limit` out of range or an unknown filter value is `400 VALIDATION_ERROR`.
+- Order is stable, most recent first. A list without a limit is a defect (norm 5.3.6).
 - Every paginated list response returns a `meta` object matching
   `_shared.yaml#/components/schemas/PaginatedMeta` exactly:
 
@@ -62,13 +85,18 @@ this document, not a silent deviation from it.
 | 200 | Success with body |
 | 201 | Successful creation |
 | 204 | Success without body (e.g. `DELETE`, some `POST` actions) |
-| 400 | Client error (validation failure) |
-| 401 | Not authenticated (missing or invalid JWT) |
-| 403 | Authenticated but not authorized for this resource/action |
-| 404 | Resource not found |
-| 409 | Conflict with current state (e.g. duplicate email, double booking) |
-| 422 | Semantically invalid request the schema alone can't reject |
-| 500 | Server error |
+| 400 | `VALIDATION_ERROR` — invalid input shape; one `details` entry per field |
+| 401 | `UNAUTHORIZED` — missing, invalid or expired JWT |
+| 403 | `FORBIDDEN` — valid token without permission for this action |
+| 404 | `NOT_FOUND` — resource or route does not exist |
+| 422 | `INVALID_STATUS_TRANSITION` (state rules) or `BUSINESS_RULE_VIOLATION` (other invariant, e.g. double booking, duplicate email) |
+| 429 | `TOO_MANY_REQUESTS` — gateway only, with `Retry-After` |
+| 500 | `INTERNAL_ERROR` — neutral message; full detail only in the log |
+| 503 | `SERVICE_UNAVAILABLE` — gateway only, target service down |
+
+`409` is not part of the course's closed code list (norm 5.3.5): conflicts with the
+current state are `422`. The contracts that still answer `409` are listed in
+`open-questions.md` OQ-05.
 
 ## Error format
 
@@ -90,8 +118,10 @@ locally:
 
 - `error`: machine-readable code in `SCREAMING_SNAKE_CASE`.
 - `message`: human-readable summary.
-- `details`: optional, present for validation errors with multiple field-level causes.
-- `traceId`: optional, present when correlating with server-side logs.
+- `details`: optional, present for validation errors — one entry per invalid field,
+  including headers such as `Idempotency-Key`.
+- `traceId`: **always present**; it is the request's `X-Correlation-Id`.
+- An error never exposes a driver message, a stack trace or an internal host name.
 
 The reusable `BadRequest` / `Unauthorized` / `Forbidden` / `NotFound` / `InternalError`
 responses in `_shared.yaml#/components/responses/` already wrap this schema — reference
