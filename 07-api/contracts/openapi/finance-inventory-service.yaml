@@ -1,0 +1,768 @@
+openapi: 3.1.0
+info:
+  title: barber-saas-finance-inventory-api
+  version: 1.0.0
+  license:
+    name: MIT
+    identifier: MIT
+  description: |
+    Servicio del dominio **finance-inventory** (`barber-saas-finance-inventory-api`,
+    ADR-004): ingresos y gastos de la barbería, su resumen por periodo, y el inventario de
+    productos con sus movimientos de stock.
+
+    **Origen ascendente:** FR-016 (registrar ingresos y gastos) y FR-017 (rechazar montos
+    ≤ 0), HU-FIN-001; FR-018 (stock y movimientos) y FR-019 (alerta de stock bajo),
+    HU-INV-001. Tablas de `06-data/models.md` § "Finance & Inventory": `finance_records`,
+    `inventory_products`, `inventory_movements`. Regla de `FinanceRecord` e
+    `InventoryProduct` en `02-domain/entities-and-rules.md`. Rutas y campos alineados con
+    `FinanceController` e `InventoryController` del monolito
+    (`code-corhuila/barber-saas@develop`).
+
+    ## Autenticación
+    JWT Bearer (`_shared.yaml#/components/securitySchemes/bearerAuth`). `barbershopId` se
+    deriva del token (`TenantContext`); ninguna operación lo recibe. Registros o productos de
+    otra barbería responden `404`, igual que los inexistentes (`DEC-APPT-01`).
+
+    ## Roles
+    Todas las operaciones son solo de `ADMIN_BARBERSHOP`, como en el monolito
+    (`@PreAuthorize("hasRole('ADMIN_BARBERSHOP')")` a nivel de controlador). `BARBER`,
+    `CLIENT` y `SUPER_ADMIN` reciben `403`.
+
+    ## Decisiones de diseño de este contrato
+
+    ### DEC-FIN-01 · El monto es siempre positivo; el signo lo da `type`
+    `amountCents` es un entero ≥ 1 para `INCOME` y para `EXPENSE` (FR-017). El resumen resta
+    los gastos; nunca se guarda un monto negativo (`data-dictionary.md`). La base no tiene
+    `CHECK (amount > 0)`, así que la validación del contrato es la única barrera.
+
+    ### DEC-FIN-02 · Los registros financieros no se editan ni se borran
+    El monolito solo expone crear y consultar, y la tabla no tiene `updated_at`. Un error se
+    corrige con un registro compensatorio del tipo contrario.
+
+    ### DEC-INV-01 · El stock solo cambia con movimientos
+    `PUT /products/{id}` no toca `currentStock` (el monolito: "Editar un producto (sin afectar
+    stock)"). El stock inicial se fija al crear el producto y después solo cambia con
+    `POST /products/{id}/movements`, que deja rastro en `inventory_movements`. Las cantidades
+    son decimales con dos cifras (`DECIMAL(10,2)`: por ejemplo, 2000.00 ml); no son dinero,
+    así que no llevan el sufijo `Cents`.
+
+servers:
+  - url: http://localhost:8080
+    description: api-gateway local (única entrada, norma 5.6.1) — las rutas incluyen `/api/v1`
+  - url: https://api.dev.{domain}
+    description: api-gateway del entorno de desarrollo
+    variables:
+      domain:
+        default: example.com
+  - url: https://api.{domain}
+    description: api-gateway de producción
+    variables:
+      domain:
+        default: example.com
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Finance records
+    description: Ingresos y gastos (`finance_records`)
+  - name: Inventory
+    description: Productos y movimientos de stock (`inventory_products`, `inventory_movements`)
+  - name: Health
+    description: Health check del servicio
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Sonda interna para `barber-saas-infra`; no se publica en el api-gateway.
+      operationId: healthCheck
+      tags: [Health]
+      security: []
+      servers:
+        - url: http://barber-saas-finance-inventory-api:8080
+          description: Red interna de compose
+      responses:
+        '200':
+          description: Servicio saludable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          $ref: './_shared.yaml#/components/responses/ServiceUnavailable'
+
+  # ─── Finance ────────────────────────────────────────────────────────────
+  /api/v1/finance/records:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Listar ingresos y gastos
+      description: 'Rol: `ADMIN_BARBERSHOP`. Orden: `recordDate` más reciente primero.'
+      operationId: listFinanceRecords
+      tags: [Finance records]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/FromDate'
+        - $ref: '#/components/parameters/ToDate'
+        - name: type
+          in: query
+          description: Filtrar por tipo
+          schema:
+            $ref: '#/components/schemas/FinanceRecordType'
+        - name: category
+          in: query
+          description: Filtrar por categoría exacta
+          schema:
+            type: string
+            maxLength: 80
+      responses:
+        '200':
+          description: Página de registros
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinanceRecordPage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+    post:
+      summary: Registrar un ingreso o gasto
+      description: 'Rol: `ADMIN_BARBERSHOP` (FR-016, HU-FIN-001 escenario 1).'
+      operationId: createFinanceRecord
+      tags: [Finance records]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFinanceRecordRequest'
+            example:
+              type: EXPENSE
+              category: Insumos
+              amountCents: 8500000
+              description: Compra de cuchillas y cera
+              recordDate: '2026-09-28'
+      responses:
+        '201':
+          description: Registro creado
+          headers:
+            Location:
+              $ref: './_shared.yaml#/components/headers/Location'
+            X-Correlation-Id:
+              $ref: './_shared.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinanceRecord'
+        '200':
+          description: Reintento con el mismo `Idempotency-Key`; devuelve el registro ya creado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinanceRecord'
+        '400':
+          description: |
+            Datos inválidos, incluido `amountCents` ≤ 0 (FR-017, HU-FIN-001 escenario 2,
+            `DEC-FIN-01`).
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: VALIDATION_ERROR
+                message: Datos de entrada inválidos
+                details:
+                  - field: amountCents
+                    message: debe ser mayor que 0
+                traceId: 550e8400-e29b-41d4-a716-446655440000
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          description: '`relatedAppointmentId` no existe o es de otra barbería.'
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/finance/records/{id}:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Obtener un registro financiero
+      description: 'Rol: `ADMIN_BARBERSHOP`. No hay `PUT` ni `DELETE` (`DEC-FIN-02`).'
+      operationId: getFinanceRecordById
+      tags: [Finance records]
+      responses:
+        '200':
+          description: Registro encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinanceRecord'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/finance/summary:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Resumen de ingresos, gastos y utilidad de un periodo
+      description: 'Rol: `ADMIN_BARBERSHOP` (HU-FIN-001 escenario 1: "aparece en el resumen financiero").'
+      operationId: getFinanceSummary
+      tags: [Finance records]
+      parameters:
+        - $ref: '#/components/parameters/FromDateRequired'
+        - $ref: '#/components/parameters/ToDateRequired'
+      responses:
+        '200':
+          description: Resumen del periodo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinanceSummary'
+              example:
+                from: '2026-09-01'
+                to: '2026-09-30'
+                totalIncomeCents: 450000000
+                totalExpensesCents: 120000000
+                netProfitCents: 330000000
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  # ─── Inventory ──────────────────────────────────────────────────────────
+  /api/v1/inventory/products:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Listar productos del inventario
+      description: 'Rol: `ADMIN_BARBERSHOP`. Orden: más reciente primero.'
+      operationId: listProducts
+      tags: [Inventory]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - name: lowStock
+          in: query
+          description: Solo productos en alerta (`true`) o fuera de alerta (`false`) — FR-019
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Página de productos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryProductPage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+    post:
+      summary: Crear un producto
+      description: 'Rol: `ADMIN_BARBERSHOP` (FR-018). `currentStock` es el stock inicial (`DEC-INV-01`).'
+      operationId: createProduct
+      tags: [Inventory]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInventoryProductRequest'
+            example:
+              name: Shampoo mentolado
+              unit: ml
+              currentStock: 2000.00
+              minStockAlert: 500.00
+      responses:
+        '201':
+          description: Producto creado
+          headers:
+            Location:
+              $ref: './_shared.yaml#/components/headers/Location'
+            X-Correlation-Id:
+              $ref: './_shared.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryProduct'
+        '200':
+          description: Reintento con el mismo `Idempotency-Key`; devuelve el producto ya creado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryProduct'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/inventory/products/{id}:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Obtener un producto
+      description: 'Rol: `ADMIN_BARBERSHOP`.'
+      operationId: getProductById
+      tags: [Inventory]
+      responses:
+        '200':
+          description: Producto encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryProduct'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+    put:
+      summary: Editar un producto (sin tocar el stock)
+      description: 'Rol: `ADMIN_BARBERSHOP`. `currentStock` se rechaza con `400` (`DEC-INV-01`).'
+      operationId: updateProduct
+      tags: [Inventory]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateInventoryProductRequest'
+      responses:
+        '200':
+          description: Producto actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryProduct'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+  /api/v1/inventory/products/{id}/movements:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: Historial de movimientos de un producto
+      description: 'Rol: `ADMIN_BARBERSHOP`. Orden: más reciente primero (índice `(product_id, created_at)`).'
+      operationId: listStockMovements
+      tags: [Inventory]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/PageParam'
+        - $ref: './_shared.yaml#/components/parameters/LimitParam'
+        - name: movementType
+          in: query
+          description: Filtrar por dirección
+          schema:
+            $ref: '#/components/schemas/InventoryMovementType'
+      responses:
+        '200':
+          description: Página de movimientos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryMovementPage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+    post:
+      summary: Registrar una entrada o salida de stock
+      description: |
+        Rol: `ADMIN_BARBERSHOP` (FR-018). `IN` suma y `OUT` resta `quantity`, que siempre es
+        positiva: la dirección la da `movementType` (`data-dictionary.md`).
+        `createdByUserId` = `sub` del token. La respuesta trae el movimiento y el producto con
+        el stock y `lowStock` ya recalculados (FR-019).
+      operationId: registerStockMovement
+      tags: [Inventory]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInventoryMovementRequest'
+            example:
+              movementType: OUT
+              quantity: 250.00
+              reason: Uso en servicios de la semana
+      responses:
+        '201':
+          description: Movimiento registrado
+          headers:
+            Location:
+              $ref: './_shared.yaml#/components/headers/Location'
+            X-Correlation-Id:
+              $ref: './_shared.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockMovementResult'
+        '200':
+          description: Reintento con el mismo `Idempotency-Key`; no mueve el stock de nuevo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockMovementResult'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './_shared.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './_shared.yaml#/components/responses/NotFound'
+        '422':
+          description: |
+            Una salida (`OUT`) dejaría el stock negativo (HU-INV-001 escenario 2; regla
+            `stock >= 0` de `InventoryProduct`). No se registra.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: BUSINESS_RULE_VIOLATION
+                message: 'Stock insuficiente: hay 100.00 ml y se intenta sacar 250.00 ml.'
+                traceId: 550e8400-e29b-41d4-a716-446655440000
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
+
+components:
+  parameters:
+    FromDate:
+      name: from
+      in: query
+      description: Fecha inicial inclusive (`YYYY-MM-DD`)
+      schema:
+        type: string
+        format: date
+    ToDate:
+      name: to
+      in: query
+      description: Fecha final inclusive (`YYYY-MM-DD`); no puede ser anterior a `from`
+      schema:
+        type: string
+        format: date
+    FromDateRequired:
+      name: from
+      in: query
+      required: true
+      description: Fecha inicial inclusive (`YYYY-MM-DD`)
+      schema:
+        type: string
+        format: date
+    ToDateRequired:
+      name: to
+      in: query
+      required: true
+      description: Fecha final inclusive (`YYYY-MM-DD`); no puede ser anterior a `from`
+      schema:
+        type: string
+        format: date
+
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        timestamp:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+
+    Quantity:
+      type: number
+      multipleOf: 0.01
+      minimum: 0
+      maximum: 99999999.99
+      description: Cantidad de stock con dos decimales (`DECIMAL(10,2)`), en la `unit` del producto.
+
+    # ─── Finance ────────────────────────────────────────────────────────
+    FinanceRecordType:
+      type: string
+      description: Enum de `finance_records.type` (06). Da el signo del monto (`DEC-FIN-01`).
+      enum: [INCOME, EXPENSE]
+
+    FinanceRecord:
+      type: object
+      description: Tabla `finance_records`.
+      required: [id, type, category, amountCents, recordDate, createdAt]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        type:
+          $ref: '#/components/schemas/FinanceRecordType'
+        category:
+          type: string
+          maxLength: 80
+          example: Insumos
+        amountCents:
+          $ref: './_shared.yaml#/components/schemas/Money'
+          minimum: 1
+          description: Monto en centavos de COP, siempre positivo (`DEC-FIN-01`). Ver OQ-06.
+        description:
+          type: [string, 'null']
+          maxLength: 255
+        recordDate:
+          type: string
+          format: date
+        relatedAppointmentId:
+          description: Cita que originó el registro, si la hubo.
+          oneOf:
+            - $ref: './_shared.yaml#/components/schemas/UUID'
+            - type: 'null'
+        createdAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+
+    CreateFinanceRecordRequest:
+      type: object
+      additionalProperties: false
+      required: [type, category, amountCents, recordDate]
+      properties:
+        type:
+          $ref: '#/components/schemas/FinanceRecordType'
+        category:
+          type: string
+          minLength: 1
+          maxLength: 80
+        amountCents:
+          $ref: './_shared.yaml#/components/schemas/Money'
+          minimum: 1
+        description:
+          type: string
+          maxLength: 255
+        recordDate:
+          type: string
+          format: date
+        relatedAppointmentId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+
+    FinanceRecordPage:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/PaginatedList'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/FinanceRecord'
+
+    FinanceSummary:
+      type: object
+      description: Derivado de `finance_records`; sin tabla propia.
+      required: [from, to, totalIncomeCents, totalExpensesCents, netProfitCents]
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        totalIncomeCents:
+          $ref: './_shared.yaml#/components/schemas/Money'
+        totalExpensesCents:
+          $ref: './_shared.yaml#/components/schemas/Money'
+        netProfitCents:
+          type: integer
+          format: int64
+          description: '`totalIncomeCents - totalExpensesCents`; puede ser negativo (pérdida).'
+
+    # ─── Inventory ──────────────────────────────────────────────────────
+    InventoryProduct:
+      type: object
+      description: Tabla `inventory_products`. No tiene `updated_at` en 06.
+      required: [id, name, unit, currentStock, minStockAlert, lowStock, createdAt]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: [string, 'null']
+          maxLength: 255
+        unit:
+          type: string
+          maxLength: 20
+          default: unidad
+          example: ml
+        currentStock:
+          $ref: '#/components/schemas/Quantity'
+        minStockAlert:
+          $ref: '#/components/schemas/Quantity'
+          description: Con el valor por defecto (0) la alerta queda en la práctica desactivada (`data-dictionary.md`).
+        lowStock:
+          type: boolean
+          readOnly: true
+          description: '`currentStock <= minStockAlert`, calculado al leer (FR-019).'
+        createdAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+
+    CreateInventoryProductRequest:
+      type: object
+      additionalProperties: false
+      required: [name, unit, currentStock, minStockAlert]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 255
+        unit:
+          type: string
+          minLength: 1
+          maxLength: 20
+        currentStock:
+          $ref: '#/components/schemas/Quantity'
+        minStockAlert:
+          $ref: '#/components/schemas/Quantity'
+
+    UpdateInventoryProductRequest:
+      type: object
+      additionalProperties: false
+      required: [name, unit, minStockAlert]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: [string, 'null']
+          maxLength: 255
+        unit:
+          type: string
+          minLength: 1
+          maxLength: 20
+        minStockAlert:
+          $ref: '#/components/schemas/Quantity'
+
+    InventoryProductPage:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/PaginatedList'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/InventoryProduct'
+
+    InventoryMovementType:
+      type: string
+      description: Enum de `inventory_movements.movement_type` (06).
+      enum: [IN, OUT]
+
+    InventoryMovement:
+      type: object
+      description: Tabla `inventory_movements` (solo-agregar).
+      required: [id, productId, movementType, quantity, createdByUserId, createdAt]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        productId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        movementType:
+          $ref: '#/components/schemas/InventoryMovementType'
+        quantity:
+          $ref: '#/components/schemas/Quantity'
+          exclusiveMinimum: 0
+        reason:
+          type: [string, 'null']
+          maxLength: 255
+        createdByUserId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        createdAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+
+    CreateInventoryMovementRequest:
+      type: object
+      additionalProperties: false
+      required: [movementType, quantity]
+      properties:
+        movementType:
+          $ref: '#/components/schemas/InventoryMovementType'
+        quantity:
+          $ref: '#/components/schemas/Quantity'
+          exclusiveMinimum: 0
+        reason:
+          type: string
+          maxLength: 255
+
+    InventoryMovementPage:
+      allOf:
+        - $ref: './_shared.yaml#/components/schemas/PaginatedList'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/InventoryMovement'
+
+    StockMovementResult:
+      type: object
+      required: [movement, product]
+      properties:
+        movement:
+          $ref: '#/components/schemas/InventoryMovement'
+        product:
+          $ref: '#/components/schemas/InventoryProduct'
+
+  securitySchemes:
+    bearerAuth:
+      $ref: './_shared.yaml#/components/securitySchemes/bearerAuth'
