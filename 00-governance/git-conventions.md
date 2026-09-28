@@ -1,62 +1,132 @@
 # Git Conventions
 
 > **Read this document before making your first commit on the project.**
+>
+> This file records how **our team** works. The course rule is
+> [`branching-policy.md`](./branching-policy.md) and the course standard is the
+> *Norma de Repositorios 2026-B*. Where this file disagrees with either of them, they win
+> (norma 1.2). The team may add stricter rules, never looser ones.
 
-## Scope and per-repo exceptions
+## Scope — repository categories
 
-This document is the general standard for the whole project. The `main ← dev ← feat/...`
-strategy below assumes a repo with a real CI/CD environment to stage through. Not every
-repo in the ecosystem has one — where that's the case, the exception below overrides the
-general strategy for that repo only (per "How governance applies" in `00-governance/
-README.md`: changed through team agreement, documented here with the reason).
-
-| Repo | Branch strategy | Reason |
+| Category | Repositories | Branch regime |
 |---|---|---|
-| **CODE** (`barber-saas`) | `main` ← `dev`/`qa` ← `feat/fix/chore/hotfix`, as described below | Real CI environments per stage |
-| **DOCS** (this repo) | Only `main`. No `dev`/`qa`. One branch per change, named `docs/NNN-slug` (`NNN` = the SPEC number the change implements), one PR each, **squash merge** straight into `main` | Documentation-only repo, no build/deploy pipeline to stage through a `dev` environment. Decided 2026-09-14. |
+| **A — Prototype** | `code-corhuila/barber-saas` | No restrictions (norma 3.1). Not evaluated after the first cut (norma 3.2). Team exception, decided 2026-09-14: work happens directly on `develop`, no new branch per task. **This exception applies to this repository only.** |
+| **B — Documentation** | `code-corhuila/barber-saas-docs` | One permanent branch: `main`. Every change goes through a child branch `docs/NNN-slug` → Pull Request → 1 approval from `ariel5253` → squash merge. **No direct commit or push to `main`, ever.** |
+| **C — Code** | the 29 `code-corhuila/barber-saas-*` repositories | Three permanent branches, `develop`, `qa` and `main`, as described below. |
 
-> **CODE currently deviates further:** by explicit decision (2026-09-14), no new branch is
-> created per task — work happens directly on `develop`. This is a temporary, explicit
-> exception to "every task = one branch + one PR" below, not an oversight; revisit it if
-> the team grows past a single contributor.
-
-The rest of this document (naming format, commit format, PR policy, merge policy) applies
-to every repo, including DOCS — only the branch *topology* differs.
-
-## Branch strategy
-
-```
-main        ← Production. Merge from release only. Always stable.
-  └── dev   ← Continuous integration. Merge from features.
-        └── feat/[description]    ← One branch per feature/user story
-        └── fix/[description]     ← One branch per bugfix
-        └── chore/[description]   ← Infrastructure, docs, dependency changes
-        └── hotfix/[description]  ← Urgent fixes directly to main
-```
-
-**Rules:**
-- Nobody commits directly to `main` or `dev`
-- Every task = one branch + one Pull Request
-- One branch = one task (do not mix different features)
-- Branches are deleted after merge
+Branch strategy, promotion and review rules apply to category C. Branch naming, commit format and
+the Pull Request policy apply to categories B and C.
 
 ---
 
-## Branch naming format
+## Branch strategy (category C)
 
 ```
-[type]/[description-in-kebab-case]
-
-Examples:
-feat/oauth2-login
-fix/schedule-overlap-calculation
-chore/update-spring-dependencies
-hotfix/null-token-expiration
+develop  <── PR ──  feat/…  fix/…  chore/…
+qa       <── PR ──  qa/…
+main     <── PR ──  release/x.y.z  hotfix/…
 ```
 
-**DOCS exception:** branches are named `docs/NNN-slug`, where `NNN` is the SPEC number
-(kept for traceability to `_ecosistema/specs/SPEC-NNN-*.md`). Example:
-`docs/002-academic-microservice-extraction`.
+**Rules:**
+- No permanent branch accepts a direct commit. The organization enforces it; it is not a suggestion.
+- Each parent branch is fed **only by its own children**: to enter `qa`, branch off `qa`; to enter
+  `main`, branch off `main`.
+- There is **no merge between permanent branches**: `merge develop → qa` and `merge qa → main` do
+  not exist in this model.
+- One branch = one task = one user story. A child branch lives at most **five business days**.
+- Deleting a child branch after its merge is recommended.
+- The permanent branches are named `develop`, `qa` and `main` in every repository. We do not use `dev`.
+
+---
+
+## Promotion and releases (category C)
+
+**Promotion happens by re-application, never by merge** (see `branching-policy.md`):
+
+```bash
+git switch qa && git pull
+git switch -c qa/hu-appt-003-walk-in-appointments
+git cherry-pick -x <sha-of-the-commit-in-develop>
+git push -u origin qa/hu-appt-003-walk-in-appointments
+# open PR → qa
+```
+
+- `-x` is mandatory. The line `(cherry picked from commit <sha>)` is the only link between the two
+  versions of a change. A commit in `qa` or `main` without it does not count as progress.
+- The cited `<sha>` must exist in the source branch. A trail that points to a non-existent commit
+  is falsified evidence.
+- **Releases** are cut from `main`, start empty, and are filled with one commit per user story
+  already validated in `qa`. The release Pull Request lists each story (id and title) with its
+  `cherry picked from` trail, the declared scope (what is in and what is out), deployment
+  instructions (migrations, new variables) and a rollback plan.
+- **Cadence:** one release per course cut, in weeks 5, 10 and 15.
+- After the release is merged, `main` is tagged with an annotated SemVer tag (see *Tags and versioning*).
+- `hotfix/` is the only other child of `main`. Every hotfix is re-applied afterwards to `qa` and
+  `develop`.
+
+---
+
+## Branch naming
+
+Format: `<prefix>/<description-in-kebab-case>`, using lowercase letters, digits and hyphens only.
+
+| Target branch | Allowed prefixes | Example |
+|---|---|---|
+| `develop` | `feat/`, `fix/`, `chore/` | `feat/015-appointment-hexagonal-skeleton` |
+| `qa` | `qa/` | `qa/hu-appt-003-walk-in-appointments` |
+| `main` (code) | `release/<major>.<minor>.<patch>`, `hotfix/` | `release/1.0.0`, `hotfix/null-token-expiration` |
+| `main` (DOCS) | `docs/` | `docs/013-align-git-conventions` |
+
+- When the work comes from a SPEC, its number goes in the slug (`docs/NNN-slug`, `feat/NNN-slug`).
+- **No other prefix is allowed** (norma 6.3.3). This includes `spec/`, which the team retired on
+  2026-09-28.
+
+---
+
+## Review rule (norma 9.4)
+
+| Branch | Required before merging |
+|---|---|
+| `develop` | 1 approval from a teammate who is **not the author** · green CI · the PR references its user story |
+| `qa` | 1 approval from a teammate who is neither the author nor the person who approved the change in `develop` · green CI · every commit carries its `(cherry picked from commit …)` trail · the PR comes from a `qa/…` branch |
+| `main` | **1 approval from `ariel5253`** · CODEOWNERS · all conversations resolved · stale approvals dismissed (enforced by the organization) |
+| `main` (DOCS) | **1 approval from `ariel5253`** |
+
+- A reviewer answers within **24 business hours**.
+- `.github/CODEOWNERS` is part of the protection rules: it is never modified or removed.
+
+---
+
+## Pull Request policy
+
+- **User story:** every PR declares the story it serves: `code-corhuila/barber-saas-docs#NN`.
+- **Target:** the branch that matches its prefix (see *Branch naming*). Any other target is a
+  process error.
+- **Size:** at most 400 changed lines, excluding tests and generated files. If larger, split it.
+- **Template:** use `.github/pull_request_template.md`.
+- **Green CI:** a PR with red CI is not merged.
+- **Promotion trail:** PRs into `qa` or `main` list the re-applied commits with their
+  `cherry picked from` lines.
+- **Automatic review:** every finding of the automatic review gets an answer in the PR, either
+  "applied (how)" or "not applied (technical reason)".
+- **History:** never rewrite the history of a published branch (`push --force`, rebasing a shared
+  branch).
+
+---
+
+## Merge policy
+
+| Into | From | Method | Why |
+|---|---|---|---|
+| `develop` | `feat/` `fix/` `chore/` | **Squash and merge** | one commit per story: that is the sha re-applied later with `-x` |
+| `qa` | `qa/…` | **Rebase and merge** | keeps each re-applied commit with its `-x` trail and creates no merge commit |
+| `main` (code) | `release/…`, `hotfix/…` | **Rebase and merge** | one commit per story in `main`, each with its trail |
+| `main` (DOCS) | `docs/…` | **Squash and merge** | one commit per documentation change |
+
+- *Rebase and merge* on GitHub applies the PR commits on top of the target. It does not rewrite any
+  published branch.
+- **Never** merge one permanent branch into another.
 
 ---
 
@@ -67,8 +137,11 @@ hotfix/null-token-expiration
 
 [optional body — explain WHY, not what]
 
-[optional footer — issue/user story references]
+[optional footer — user story reference, e.g. Refs code-corhuila/barber-saas-docs#NN; Spec: SPEC-NNN]
 ```
+
+The subject must match:
+`^(feat|fix|docs|style|refactor|test|chore|perf)(\([a-z0-9.-]+\))?: [a-z]`
 
 **Types:**
 | Type | When to use |
@@ -91,35 +164,17 @@ Closes #42
 
 docs(api): update actor service OpenAPI contract
 
-chore(deps): upgrade Spring Boot to 3.2.0
+chore(deps): upgrade Spring Boot to 3.5.0
 ```
-
----
-
-## Pull Request policy
-
-- **Size:** maximum 400 lines of code (excluding tests). If larger, split it.
-- **Reviewers:** minimum 1 approval before merging
-- **Review time:** reviewer has a maximum of 24 business hours
-- **Template:** use the template at `.github/pull_request_template.md`
-- **Green CI:** merge only proceeds if all pipeline checks pass
-
----
-
-## Merge policy
-
-- Use **Squash and Merge** for features (keeps `dev` history clean)
-- Use **Merge Commit** for releases to `main` (preserves full history)
-- **Do not** use Rebase & Merge (creates confusion in shared history)
 
 ---
 
 ## Tags and versioning
 
-Follow [SemVer](https://semver.org/): `MAJOR.MINOR.PATCH`
+Follow [SemVer](https://semver.org/): `MAJOR.MINOR.PATCH`. Tag `main` once the release PR is merged:
 
 ```bash
-# When releasing to production
-git tag -a v1.2.0 -m "Release v1.2.0: add reports module"
+git switch main && git pull
+git tag -a v1.2.0 -m "Release v1.2.0: short scope summary"
 git push origin v1.2.0
 ```
