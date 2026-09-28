@@ -132,6 +132,19 @@ not an edit to this file.
 | `auth-service.yaml` | Answers `409` for a duplicate email — must be `422 BUSINESS_RULE_VIOLATION` |
 | all four (incl. `_template-service.yaml`) | No `Idempotency-Key` on creating operations; no `X-Correlation-Id` header; `servers` point at a service port instead of the api-gateway; paths still use the monolith's role prefixes |
 | all four | Error examples written before 1.1.0 lack `traceId`, now required by `ErrorResponse` |
+| `appointment-service.yaml`, `auth-service.yaml` | Error examples use codes outside the closed `ErrorCode` list, so they no longer validate against `_shared.yaml` 1.1.0 (see the mapping below) |
+
+Codes outside the closed list and the code of norm 5.3.5 that replaces each one:
+
+| Contract | Current code | Replace with |
+|---|---|---|
+| `appointment-service.yaml` | `INVALID_TRANSITION` | `INVALID_STATUS_TRANSITION` (422) |
+| `appointment-service.yaml` | `SLOT_ALREADY_BOOKED` | `BUSINESS_RULE_VIOLATION` (422) |
+| `appointment-service.yaml` | `CANCELLATION_WINDOW_CLOSED` | `BUSINESS_RULE_VIOLATION` (422) |
+| `auth-service.yaml` | `EMAIL_ALREADY_EXISTS` | `BUSINESS_RULE_VIOLATION` (422) |
+| `auth-service.yaml` | `INVALID_CREDENTIALS` | `UNAUTHORIZED` (401) |
+
+The specific cause stays readable in `message` and, when useful, in `details`.
 
 **Why it's still open:** each contract is its own change, reviewed with its service's
 owner; bundling them with the shared components would exceed the 400-line PR limit
