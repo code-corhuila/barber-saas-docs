@@ -1,68 +1,72 @@
-# Decisiones técnicas — Auth Service
+# Technical Decisions — Auth Service
 
-> Decisiones de diseño del servicio de autenticación que complementan los ADRs globales.
+> **Framework example, not BarberSaaS's identity-auth.** BarberSaaS's authentication decisions
+> are in `07-api/authentication.md` and `07-api/contracts/openapi/auth-service.yaml`
+> (`DEC-AUTH-*`).
 
----
-
-## Decisión: Algoritmo de firma JWT — RS256 vs HS256
-
-**Fecha:** [fecha]
-**Contexto:** JWT puede firmarse con HMAC-SHA256 (HS256, clave simétrica compartida) o
-RSA-SHA256 (RS256, par de claves pública/privada).
-
-**Decisión:** RS256 — clave privada solo en auth-service, clave pública disponible en
-`GET /api/v1/auth/jwks` para que cualquier servicio pueda verificar tokens sin llamar al auth-service.
-
-**Consecuencias:**
-- Cada servicio puede verificar tokens de forma independiente (sin latencia de red)
-- La rotación de claves es operativamente más compleja (hay que distribuir la nueva clave pública)
-- El JWKS endpoint permite rotación gradual con múltiples claves activas simultáneamente
+> Design decisions of the authentication service that complement the global ADRs.
 
 ---
 
-## Decisión: Refresh tokens en base de datos vs. stateless
+## Decision: JWT signing algorithm — RS256 vs HS256
 
-**Fecha:** [fecha]
-**Contexto:** Los refresh tokens pueden ser stateless (JWT largo) o stateful (ID en BD).
+**Date:** [date]
+**Context:** A JWT can be signed with HMAC-SHA256 (HS256, shared symmetric key) or
+RSA-SHA256 (RS256, public/private key pair).
 
-**Decisión:** Stateful — el refresh token es un UUID almacenado en la tabla `refresh_tokens`.
-Solo el hash SHA-256 se persiste (nunca el valor real).
+**Decision:** RS256 — private key only in auth-service, public key available at
+`GET /api/v1/auth/jwks` so any service can verify tokens without calling auth-service.
 
-**Consecuencias:**
-- Revocación inmediata posible (logout de dispositivo específico, suspensión de cuenta)
-- Requiere un lookup a PostgreSQL en cada uso del refresh token
-- La BD de refresh_tokens puede convertirse en bottleneck si hay millones de sesiones activas
-
----
-
-## Decisión: Dónde vive la verificación de permisos por recurso
-
-**Fecha:** [fecha]
-**Contexto:** Los permisos granulares (ej: "solo puede ver sus propias citas") pueden vivir
-en auth-service o en cada servicio de negocio.
-
-**Decisión:** Auth-service gestiona roles (ADMIN, USER, VIEWER). Los permisos granulares
-por recurso son responsabilidad de cada microservicio de negocio.
-
-**Razón:** Auth-service no conoce el dominio de cada servicio. Centralizar permisos granulares
-crearía un acoplamiento bidireccional y haría al auth-service dependiente de todos los demás.
+**Consequences:**
+- Each service can verify tokens independently (no network latency)
+- Key rotation is operationally more complex (the new public key must be distributed)
+- The JWKS endpoint allows gradual rotation with several active keys at the same time
 
 ---
 
-## Decisión: Política de bloqueo de cuentas
+## Decision: Refresh tokens in the database vs. stateless
 
-**Fecha:** [fecha]
-**Decisión:** [N] intentos fallidos → bloqueo por [M] minutos. El contador se resetea
-en login exitoso. El bloqueo se almacena en Redis (TTL = M minutos, autolimpieza).
+**Date:** [date]
+**Context:** Refresh tokens can be stateless (long-lived JWT) or stateful (id in the DB).
 
-**Consecuencias:**
-- Un atacante puede hacer DoS a un usuario específico forzando el bloqueo
-- Mitigación: el bloqueo gradual (5 min → 30 min → 24 hours) reduce el impacto
+**Decision:** Stateful — the refresh token is a UUID stored in the `refresh_tokens` table.
+Only its SHA-256 hash is persisted (never the real value).
+
+**Consequences:**
+- Immediate revocation is possible (logout of a specific device, account suspension)
+- Requires a PostgreSQL lookup on every use of the refresh token
+- The refresh_tokens table can become a bottleneck with millions of active sessions
 
 ---
 
-## Correlaciones
+## Decision: Where per-resource permission checks live
 
-- ADRs de arquitectura global → `05-architecture/decisions/records/`
-- Reglas de seguridad técnica → `00-governance/security-rules.md`
-- Modelo de datos → `data-model.md`
+**Date:** [date]
+**Context:** Fine-grained permissions (e.g. "can only see their own appointments") can live
+in auth-service or in each business service.
+
+**Decision:** Auth-service manages roles (ADMIN, USER, VIEWER). Fine-grained per-resource
+permissions are the responsibility of each business microservice.
+
+**Reason:** Auth-service does not know each service's domain. Centralizing fine-grained
+permissions would create a two-way coupling and make auth-service depend on all the others.
+
+---
+
+## Decision: Account lockout policy
+
+**Date:** [date]
+**Decision:** [N] failed attempts → locked for [M] minutes. The counter resets on a successful
+login. The lock is stored in Redis (TTL = M minutes, self-cleaning).
+
+**Consequences:**
+- An attacker can DoS a specific user by forcing the lock
+- Mitigation: gradual locking (5 min → 30 min → 24 hours) reduces the impact
+
+---
+
+## Correlations
+
+- Global architecture ADRs → `05-architecture/decisions/records/`
+- Technical security rules → `00-governance/security-rules.md`
+- Data model → `data-model.md`
