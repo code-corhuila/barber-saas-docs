@@ -62,7 +62,9 @@ resolved to point at the closing SPEC.
 
 ## OQ-03 — `notification-service.yaml` has no extraction timeline or owner
 
-**Status:** open, contract is a placeholder by design.
+**Status:** closed (2026-09-28). ADR-004 made notifications its own domain (`barber-saas-notifications-api`, `-db`, `-app`), and `notification-service.yaml` 2.0.0 describes that service instead of a planned extraction.
+
+**Original status:** open, contract is a placeholder by design.
 
 **Evidence:** the contract's own `info.description` says it is a "planned contract for
 when notification is extracted from the modular monolith per ADR-003. Not yet an
@@ -98,7 +100,9 @@ tracked in `15-project-control/`.
 
 ## OQ-04 — JWT is signed with HS512; the course norm requires RS256
 
-**Status:** open, conflicts with course norm 5.3.7.
+**Status:** closed (2026-09-28). ADR-005 (consequences) and norm 5.3.7 fix RS256 with the identity service's public key; `authentication.md`, `auth-service.yaml` (`/api/v1/auth/jwks`), `_shared.yaml` and `05-architecture/overview.md` §5/§7 describe it.
+
+**Original status:** open, conflicts with course norm 5.3.7.
 
 **Evidence:** `authentication.md` documents "HS512 (symmetric, shared-secret HMAC — not
 RS256)", with the secret "shared only between the components that issue and validate
@@ -122,7 +126,9 @@ not an edit to this file.
 
 ## OQ-05 — Service contracts do not follow the common contract yet
 
-**Status:** open (found 2026-09-28 while aligning `_shared.yaml` with norm 5.3.5–5.3.9).
+**Status:** closed (2026-09-28). `appointment-service.yaml`, `auth-service.yaml` and `notification-service.yaml` 2.0.0 and `_template-service.yaml` use `/api/v1` paths behind the gateway, `Idempotency-Key`, `X-Correlation-Id`, `PaginatedList`, `Money`, the shared responses and only codes of the closed list; every contract's `servers` points at the gateway. This also closes the contract side of OQ-06 (`priceAtBookingCents`) and OQ-11 (`DEC-PLAT-03` reads the stored `trialEndsAt`).
+
+**Original status:** open (found 2026-09-28 while aligning `_shared.yaml` with norm 5.3.5–5.3.9).
 
 **Evidence:**
 
@@ -300,3 +306,24 @@ job (in `barber-saas-worker`) doesn't exist yet.
 
 **Closing criterion:** the barbershop schema either adds `trial_ends_at` or documents the
 derivation, and `DEC-PLAT-03` is updated to match.
+
+---
+
+## OQ-12 — Owner onboarding creates a user and a barbershop in two domains
+
+**Status:** open (found 2026-09-28 while aligning `auth-service.yaml`).
+
+**Evidence:** FR-004 lets a prospective owner self-register with a new barbershop in `TRIAL`.
+The user lives in `identity_auth.app_user` and the barbershop in `barbershop.barbershop`, two
+databases (ADR-004, norm 7.3). `auth-service.yaml` therefore registers only `CLIENT`
+accounts (`DEC-AUTH-01`): a single request cannot create both rows in one transaction.
+
+**Why it's still open:** it is a cross-domain process with a compensation (deactivate the user
+if the barbershop cannot be created), so it belongs to `barber-saas-workflow` as a saga
+(norm 5.8), whose state store is ADR-009 (proposed).
+
+**Responsible:** team — with the workflow design.
+
+**Closing criterion:** a saga `POST /api/v1/sagas/owner-onboarding` is specified (steps,
+compensations, `failedStep`) and `auth-service.yaml` / `barbershop-service.yaml` declare the
+internal operations it calls with a service token.

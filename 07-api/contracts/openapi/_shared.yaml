@@ -313,12 +313,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        JWT obtained from POST /auth/login of the identity service.
+        JWT obtained from POST /api/v1/auth/login of the identity service.
         Send it in the header: Authorization: Bearer <token>
 
         Target validation per norm 5.3.7: every service validates the token itself (the
         gateway only checks it is present, 5.6.2) — algorithm exactly RS256 with the identity
         service's public key, any other `alg` (including `none` and `HS256`) rejected, `exp`
-        and `sub` required. No service holds the private key or a shared secret. The current
-        HS512 mechanism in `authentication.md` does not meet this yet — see
-        `open-questions.md` OQ-04.
+        and `sub` required. No service holds the private key or a shared secret. Keys are published
+        at `GET /api/v1/auth/jwks`; claims and rules in `authentication.md`.

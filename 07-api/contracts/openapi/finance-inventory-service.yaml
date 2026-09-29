@@ -1,61 +1,63 @@
 openapi: 3.1.0
 info:
   title: barber-saas-finance-inventory-api
-  version: 1.0.0
+  version: 1.1.0
   license:
     name: MIT
     identifier: MIT
   description: |
-    Servicio del dominio **finance-inventory** (`barber-saas-finance-inventory-api`,
-    ADR-004): ingresos y gastos de la barbería, su resumen por periodo, y el inventario de
-    productos con sus movimientos de stock.
+    Service of the **finance-inventory** domain (`barber-saas-finance-inventory-api`, ADR-004):
+    the barbershop's income and expenses, their summary per period, and the product inventory
+    with its stock movements.
 
-    **Origen ascendente:** FR-016 (registrar ingresos y gastos) y FR-017 (rechazar montos
-    ≤ 0), HU-FIN-001; FR-018 (stock y movimientos) y FR-019 (alerta de stock bajo),
-    HU-INV-001. Tablas de `06-data/models.md` § "Finance & Inventory": `finance_records`,
-    `inventory_products`, `inventory_movements`. Regla de `FinanceRecord` e
-    `InventoryProduct` en `02-domain/entities-and-rules.md`. Rutas y campos alineados con
-    `FinanceController` e `InventoryController` del monolito
-    (`code-corhuila/barber-saas@develop`).
+    1.1.0 — translated to English (ADR-001); table names and constraints aligned with
+    `06-data/models.md` §8.
 
-    ## Autenticación
-    JWT Bearer (`_shared.yaml#/components/securitySchemes/bearerAuth`). `barbershopId` se
-    deriva del token (`TenantContext`); ninguna operación lo recibe. Registros o productos de
-    otra barbería responden `404`, igual que los inexistentes (`DEC-APPT-01`).
+    **Upstream origin:** FR-016 (record income and expenses) and FR-017 (reject amounts ≤ 0),
+    HU-FIN-001; FR-018 (stock and movements) and FR-019 (low-stock alert), HU-INV-001. Tables of
+    `06-data/models.md` §8 (schema `finance_inventory`): `finance_record`, `inventory_product`,
+    `inventory_movement`. `FinanceRecord` and `InventoryProduct` rules in
+    `02-domain/entities-and-rules.md`. Paths and fields aligned with the prototype's
+    `FinanceController` and `InventoryController` (`code-corhuila/barber-saas@develop`).
+
+    ## Authentication
+    JWT Bearer, RS256 (`_shared.yaml#/components/securitySchemes/bearerAuth`). `barbershopId`
+    comes from the token's claim; no operation receives it. Records or products of another
+    barbershop answer `404`, the same as non-existent ones (`DEC-APPT-01`).
 
     ## Roles
-    Todas las operaciones son solo de `ADMIN_BARBERSHOP`, como en el monolito
-    (`@PreAuthorize("hasRole('ADMIN_BARBERSHOP')")` a nivel de controlador). `BARBER`,
-    `CLIENT` y `SUPER_ADMIN` reciben `403`.
+    Every operation is `ADMIN_BARBERSHOP` only, as in the prototype
+    (`@PreAuthorize("hasRole('ADMIN_BARBERSHOP')")` at controller level). `BARBER`, `CLIENT` and
+    `SUPER_ADMIN` get `403`.
 
-    ## Decisiones de diseño de este contrato
+    ## Design decisions of this contract
 
-    ### DEC-FIN-01 · El monto es siempre positivo; el signo lo da `type`
-    `amountCents` es un entero ≥ 1 para `INCOME` y para `EXPENSE` (FR-017). El resumen resta
-    los gastos; nunca se guarda un monto negativo (`data-dictionary.md`). La base no tiene
-    `CHECK (amount > 0)`, así que la validación del contrato es la única barrera.
+    ### DEC-FIN-01 · The amount is always positive; `type` gives the sign
+    `amountCents` is an integer ≥ 1 for both `INCOME` and `EXPENSE` (FR-017). The summary
+    subtracts expenses; a negative amount is never stored (`data-dictionary.md`). The contract
+    validates it and the database enforces it too (`chk_finance_record_amount`).
 
-    ### DEC-FIN-02 · Los registros financieros no se editan ni se borran
-    El monolito solo expone crear y consultar, y la tabla no tiene `updated_at`. Un error se
-    corrige con un registro compensatorio del tipo contrario.
+    ### DEC-FIN-02 · Finance records are neither edited nor deleted
+    The prototype only exposed create and read, and the table has no `updated_at`. A mistake is
+    corrected with a compensating record of the opposite type.
 
-    ### DEC-INV-01 · El stock solo cambia con movimientos
-    `PUT /products/{id}` no toca `currentStock` (el monolito: "Editar un producto (sin afectar
-    stock)"). El stock inicial se fija al crear el producto y después solo cambia con
-    `POST /products/{id}/movements`, que deja rastro en `inventory_movements`. Las cantidades
-    son decimales con dos cifras (`DECIMAL(10,2)`: por ejemplo, 2000.00 ml); no son dinero,
-    así que no llevan el sufijo `Cents`.
+    ### DEC-INV-01 · Stock only changes through movements
+    `PUT /products/{id}` does not touch `currentStock` (the prototype: "edit a product without
+    affecting stock"). The initial stock is set when the product is created and afterwards only
+    changes with `POST /products/{id}/movements`, which leaves a trail in `inventory_movement`.
+    Quantities are decimals with two digits (`numeric(12,2)`, e.g. 2000.00 ml); they are not
+    money, so they carry no `Cents` suffix.
 
 servers:
-  - url: http://localhost:8080
-    description: api-gateway local (única entrada, norma 5.6.1) — las rutas incluyen `/api/v1`
+  - url: http://localhost:8000
+    description: Local api-gateway (single entry, norm 5.6.1) — paths include `/api/v1`
   - url: https://api.dev.{domain}
-    description: api-gateway del entorno de desarrollo
+    description: Development api-gateway
     variables:
       domain:
         default: example.com
   - url: https://api.{domain}
-    description: api-gateway de producción
+    description: Production api-gateway
     variables:
       domain:
         default: example.com
@@ -65,26 +67,26 @@ security:
 
 tags:
   - name: Finance records
-    description: Ingresos y gastos (`finance_records`)
+    description: Income and expenses (`finance_record`)
   - name: Inventory
-    description: Productos y movimientos de stock (`inventory_products`, `inventory_movements`)
+    description: Products and stock movements (`inventory_product`, `inventory_movement`)
   - name: Health
-    description: Health check del servicio
+    description: Service health check
 
 paths:
   /health:
     get:
       summary: Health check
-      description: Sonda interna para `barber-saas-infra`; no se publica en el api-gateway.
+      description: Internal probe for `barber-saas-infra`; not published through the api-gateway.
       operationId: healthCheck
       tags: [Health]
       security: []
       servers:
-        - url: http://barber-saas-finance-inventory-api:8080
-          description: Red interna de compose
+        - url: http://finance-inventory-api:8080
+          description: Internal compose network
       responses:
         '200':
-          description: Servicio saludable
+          description: Service healthy
           content:
             application/json:
               schema:
@@ -97,8 +99,8 @@ paths:
     parameters:
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Listar ingresos y gastos
-      description: 'Rol: `ADMIN_BARBERSHOP`. Orden: `recordDate` más reciente primero.'
+      summary: List income and expenses
+      description: 'Role: `ADMIN_BARBERSHOP`. Order: most recent `recordDate` first.'
       operationId: listFinanceRecords
       tags: [Finance records]
       parameters:
@@ -108,18 +110,18 @@ paths:
         - $ref: '#/components/parameters/ToDate'
         - name: type
           in: query
-          description: Filtrar por tipo
+          description: Filter by type
           schema:
             $ref: '#/components/schemas/FinanceRecordType'
         - name: category
           in: query
-          description: Filtrar por categoría exacta
+          description: Filter by exact category
           schema:
             type: string
             maxLength: 80
       responses:
         '200':
-          description: Página de registros
+          description: Page of records
           content:
             application/json:
               schema:
@@ -133,8 +135,8 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
     post:
-      summary: Registrar un ingreso o gasto
-      description: 'Rol: `ADMIN_BARBERSHOP` (FR-016, HU-FIN-001 escenario 1).'
+      summary: Record an income or an expense
+      description: 'Role: `ADMIN_BARBERSHOP` (FR-016, HU-FIN-001 scenario 1).'
       operationId: createFinanceRecord
       tags: [Finance records]
       parameters:
@@ -147,13 +149,13 @@ paths:
               $ref: '#/components/schemas/CreateFinanceRecordRequest'
             example:
               type: EXPENSE
-              category: Insumos
+              category: Supplies
               amountCents: 8500000
-              description: Compra de cuchillas y cera
+              description: Blades and wax purchase
               recordDate: '2026-09-28'
       responses:
         '201':
-          description: Registro creado
+          description: Record created
           headers:
             Location:
               $ref: './_shared.yaml#/components/headers/Location'
@@ -164,14 +166,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/FinanceRecord'
         '200':
-          description: Reintento con el mismo `Idempotency-Key`; devuelve el registro ya creado.
+          description: Retry with the same `Idempotency-Key`; returns the record already created.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/FinanceRecord'
         '400':
           description: |
-            Datos inválidos, incluido `amountCents` ≤ 0 (FR-017, HU-FIN-001 escenario 2,
+            Invalid data, including `amountCents` ≤ 0 (FR-017, HU-FIN-001 scenario 2,
             `DEC-FIN-01`).
           content:
             application/json:
@@ -179,17 +181,17 @@ paths:
                 $ref: './_shared.yaml#/components/schemas/ErrorResponse'
               example:
                 error: VALIDATION_ERROR
-                message: Datos de entrada inválidos
+                message: Invalid input data
                 details:
                   - field: amountCents
-                    message: debe ser mayor que 0
+                    message: must be greater than 0
                 traceId: 550e8400-e29b-41d4-a716-446655440000
         '401':
           $ref: './_shared.yaml#/components/responses/Unauthorized'
         '403':
           $ref: './_shared.yaml#/components/responses/Forbidden'
         '404':
-          description: '`relatedAppointmentId` no existe o es de otra barbería.'
+          description: '`relatedAppointmentId` does not exist or belongs to another barbershop.'
           content:
             application/json:
               schema:
@@ -202,13 +204,13 @@ paths:
       - $ref: './_shared.yaml#/components/parameters/IdParam'
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Obtener un registro financiero
-      description: 'Rol: `ADMIN_BARBERSHOP`. No hay `PUT` ni `DELETE` (`DEC-FIN-02`).'
+      summary: Get a finance record
+      description: 'Role: `ADMIN_BARBERSHOP`. There is no `PUT` or `DELETE` (`DEC-FIN-02`).'
       operationId: getFinanceRecordById
       tags: [Finance records]
       responses:
         '200':
-          description: Registro encontrado
+          description: Record found
           content:
             application/json:
               schema:
@@ -226,8 +228,8 @@ paths:
     parameters:
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Resumen de ingresos, gastos y utilidad de un periodo
-      description: 'Rol: `ADMIN_BARBERSHOP` (HU-FIN-001 escenario 1: "aparece en el resumen financiero").'
+      summary: Income, expenses and profit summary of a period
+      description: 'Role: `ADMIN_BARBERSHOP` (HU-FIN-001 scenario 1: "it appears in the financial summary").'
       operationId: getFinanceSummary
       tags: [Finance records]
       parameters:
@@ -235,7 +237,7 @@ paths:
         - $ref: '#/components/parameters/ToDateRequired'
       responses:
         '200':
-          description: Resumen del periodo
+          description: Summary of the period
           content:
             application/json:
               schema:
@@ -260,8 +262,8 @@ paths:
     parameters:
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Listar productos del inventario
-      description: 'Rol: `ADMIN_BARBERSHOP`. Orden: más reciente primero.'
+      summary: List inventory products
+      description: 'Role: `ADMIN_BARBERSHOP`. Order: most recent first.'
       operationId: listProducts
       tags: [Inventory]
       parameters:
@@ -269,12 +271,12 @@ paths:
         - $ref: './_shared.yaml#/components/parameters/LimitParam'
         - name: lowStock
           in: query
-          description: Solo productos en alerta (`true`) o fuera de alerta (`false`) — FR-019
+          description: Only products in alert (`true`) or out of alert (`false`) — FR-019
           schema:
             type: boolean
       responses:
         '200':
-          description: Página de productos
+          description: Page of products
           content:
             application/json:
               schema:
@@ -288,8 +290,8 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
     post:
-      summary: Crear un producto
-      description: 'Rol: `ADMIN_BARBERSHOP` (FR-018). `currentStock` es el stock inicial (`DEC-INV-01`).'
+      summary: Create a product
+      description: 'Role: `ADMIN_BARBERSHOP` (FR-018). `currentStock` is the initial stock (`DEC-INV-01`).'
       operationId: createProduct
       tags: [Inventory]
       parameters:
@@ -301,13 +303,13 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateInventoryProductRequest'
             example:
-              name: Shampoo mentolado
+              name: Menthol shampoo
               unit: ml
               currentStock: 2000.00
               minStockAlert: 500.00
       responses:
         '201':
-          description: Producto creado
+          description: Product created
           headers:
             Location:
               $ref: './_shared.yaml#/components/headers/Location'
@@ -318,7 +320,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/InventoryProduct'
         '200':
-          description: Reintento con el mismo `Idempotency-Key`; devuelve el producto ya creado.
+          description: Retry with the same `Idempotency-Key`; returns the product already created.
           content:
             application/json:
               schema:
@@ -337,13 +339,13 @@ paths:
       - $ref: './_shared.yaml#/components/parameters/IdParam'
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Obtener un producto
-      description: 'Rol: `ADMIN_BARBERSHOP`.'
+      summary: Get a product
+      description: 'Role: `ADMIN_BARBERSHOP`.'
       operationId: getProductById
       tags: [Inventory]
       responses:
         '200':
-          description: Producto encontrado
+          description: Product found
           content:
             application/json:
               schema:
@@ -357,8 +359,8 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
     put:
-      summary: Editar un producto (sin tocar el stock)
-      description: 'Rol: `ADMIN_BARBERSHOP`. `currentStock` se rechaza con `400` (`DEC-INV-01`).'
+      summary: Edit a product (without touching stock)
+      description: 'Role: `ADMIN_BARBERSHOP`. `currentStock` is rejected with `400` (`DEC-INV-01`).'
       operationId: updateProduct
       tags: [Inventory]
       requestBody:
@@ -369,7 +371,7 @@ paths:
               $ref: '#/components/schemas/UpdateInventoryProductRequest'
       responses:
         '200':
-          description: Producto actualizado
+          description: Product updated
           content:
             application/json:
               schema:
@@ -390,8 +392,8 @@ paths:
       - $ref: './_shared.yaml#/components/parameters/IdParam'
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Historial de movimientos de un producto
-      description: 'Rol: `ADMIN_BARBERSHOP`. Orden: más reciente primero (índice `(product_id, created_at)`).'
+      summary: Movement history of a product
+      description: 'Role: `ADMIN_BARBERSHOP`. Order: most recent first (index `idx_inventory_movement_product_created`).'
       operationId: listStockMovements
       tags: [Inventory]
       parameters:
@@ -399,12 +401,12 @@ paths:
         - $ref: './_shared.yaml#/components/parameters/LimitParam'
         - name: movementType
           in: query
-          description: Filtrar por dirección
+          description: Filter by direction
           schema:
             $ref: '#/components/schemas/InventoryMovementType'
       responses:
         '200':
-          description: Página de movimientos
+          description: Page of movements
           content:
             application/json:
               schema:
@@ -420,12 +422,12 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
     post:
-      summary: Registrar una entrada o salida de stock
+      summary: Record a stock entry or exit
       description: |
-        Rol: `ADMIN_BARBERSHOP` (FR-018). `IN` suma y `OUT` resta `quantity`, que siempre es
-        positiva: la dirección la da `movementType` (`data-dictionary.md`).
-        `createdByUserId` = `sub` del token. La respuesta trae el movimiento y el producto con
-        el stock y `lowStock` ya recalculados (FR-019).
+        Role: `ADMIN_BARBERSHOP` (FR-018). `IN` adds and `OUT` subtracts `quantity`, which is
+        always positive: `movementType` gives the direction (`data-dictionary.md`).
+        `createdByUserId` = the token's `sub`. The response carries the movement and the product
+        with its stock and `lowStock` already recomputed (FR-019).
       operationId: registerStockMovement
       tags: [Inventory]
       parameters:
@@ -439,10 +441,10 @@ paths:
             example:
               movementType: OUT
               quantity: 250.00
-              reason: Uso en servicios de la semana
+              reason: Used in this week's services
       responses:
         '201':
-          description: Movimiento registrado
+          description: Movement recorded
           headers:
             Location:
               $ref: './_shared.yaml#/components/headers/Location'
@@ -453,7 +455,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/StockMovementResult'
         '200':
-          description: Reintento con el mismo `Idempotency-Key`; no mueve el stock de nuevo.
+          description: Retry with the same `Idempotency-Key`; does not move the stock again.
           content:
             application/json:
               schema:
@@ -468,15 +470,15 @@ paths:
           $ref: './_shared.yaml#/components/responses/NotFound'
         '422':
           description: |
-            Una salida (`OUT`) dejaría el stock negativo (HU-INV-001 escenario 2; regla
-            `stock >= 0` de `InventoryProduct`). No se registra.
+            An exit (`OUT`) would leave negative stock (HU-INV-001 scenario 2; rule `stock >= 0`
+            of `InventoryProduct`, `chk_inventory_product_stock`). It is not recorded.
           content:
             application/json:
               schema:
                 $ref: './_shared.yaml#/components/schemas/ErrorResponse'
               example:
                 error: BUSINESS_RULE_VIOLATION
-                message: 'Stock insuficiente: hay 100.00 ml y se intenta sacar 250.00 ml.'
+                message: 'Insufficient stock: 100.00 ml available, 250.00 ml requested'
                 traceId: 550e8400-e29b-41d4-a716-446655440000
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
@@ -486,14 +488,14 @@ components:
     FromDate:
       name: from
       in: query
-      description: Fecha inicial inclusive (`YYYY-MM-DD`)
+      description: Start date, inclusive (`YYYY-MM-DD`)
       schema:
         type: string
         format: date
     ToDate:
       name: to
       in: query
-      description: Fecha final inclusive (`YYYY-MM-DD`); no puede ser anterior a `from`
+      description: End date, inclusive (`YYYY-MM-DD`); cannot be before `from`
       schema:
         type: string
         format: date
@@ -501,7 +503,7 @@ components:
       name: from
       in: query
       required: true
-      description: Fecha inicial inclusive (`YYYY-MM-DD`)
+      description: Start date, inclusive (`YYYY-MM-DD`)
       schema:
         type: string
         format: date
@@ -509,7 +511,7 @@ components:
       name: to
       in: query
       required: true
-      description: Fecha final inclusive (`YYYY-MM-DD`); no puede ser anterior a `from`
+      description: End date, inclusive (`YYYY-MM-DD`); cannot be before `from`
       schema:
         type: string
         format: date
@@ -529,18 +531,18 @@ components:
       type: number
       multipleOf: 0.01
       minimum: 0
-      maximum: 99999999.99
-      description: Cantidad de stock con dos decimales (`DECIMAL(10,2)`), en la `unit` del producto.
+      maximum: 9999999999.99
+      description: Stock quantity with two decimals (`numeric(12,2)`), in the product's `unit`.
 
     # ─── Finance ────────────────────────────────────────────────────────
     FinanceRecordType:
       type: string
-      description: Enum de `finance_records.type` (06). Da el signo del monto (`DEC-FIN-01`).
+      description: Same values as `chk_finance_record_type` (06). Gives the amount's sign (`DEC-FIN-01`).
       enum: [INCOME, EXPENSE]
 
     FinanceRecord:
       type: object
-      description: Tabla `finance_records`.
+      description: Table `finance_record`.
       required: [id, type, category, amountCents, recordDate, createdAt]
       properties:
         id:
@@ -550,11 +552,11 @@ components:
         category:
           type: string
           maxLength: 80
-          example: Insumos
+          example: Supplies
         amountCents:
           $ref: './_shared.yaml#/components/schemas/Money'
           minimum: 1
-          description: Monto en centavos de COP, siempre positivo (`DEC-FIN-01`). Ver OQ-06.
+          description: Amount in COP cents, always positive (`DEC-FIN-01`, column `amount_cents`).
         description:
           type: [string, 'null']
           maxLength: 255
@@ -562,7 +564,7 @@ components:
           type: string
           format: date
         relatedAppointmentId:
-          description: Cita que originó el registro, si la hubo.
+          description: Appointment that originated the record, if any.
           oneOf:
             - $ref: './_shared.yaml#/components/schemas/UUID'
             - type: 'null'
@@ -604,7 +606,7 @@ components:
 
     FinanceSummary:
       type: object
-      description: Derivado de `finance_records`; sin tabla propia.
+      description: Derived from `finance_record`; no table of its own.
       required: [from, to, totalIncomeCents, totalExpensesCents, netProfitCents]
       properties:
         from:
@@ -620,12 +622,12 @@ components:
         netProfitCents:
           type: integer
           format: int64
-          description: '`totalIncomeCents - totalExpensesCents`; puede ser negativo (pérdida).'
+          description: '`totalIncomeCents - totalExpensesCents`; may be negative (loss).'
 
     # ─── Inventory ──────────────────────────────────────────────────────
     InventoryProduct:
       type: object
-      description: Tabla `inventory_products`. No tiene `updated_at` en 06.
+      description: Table `inventory_product`. It has no `updated_at` in 06.
       required: [id, name, unit, currentStock, minStockAlert, lowStock, createdAt]
       properties:
         id:
@@ -645,11 +647,11 @@ components:
           $ref: '#/components/schemas/Quantity'
         minStockAlert:
           $ref: '#/components/schemas/Quantity'
-          description: Con el valor por defecto (0) la alerta queda en la práctica desactivada (`data-dictionary.md`).
+          description: With the default value (0) the alert is in practice disabled (`data-dictionary.md`).
         lowStock:
           type: boolean
           readOnly: true
-          description: '`currentStock <= minStockAlert`, calculado al leer (FR-019).'
+          description: '`currentStock <= minStockAlert`, computed on read (FR-019).'
         createdAt:
           $ref: './_shared.yaml#/components/schemas/Timestamp'
 
@@ -705,12 +707,12 @@ components:
 
     InventoryMovementType:
       type: string
-      description: Enum de `inventory_movements.movement_type` (06).
+      description: Same values as `chk_inventory_movement_type` (06).
       enum: [IN, OUT]
 
     InventoryMovement:
       type: object
-      description: Tabla `inventory_movements` (solo-agregar).
+      description: Table `inventory_movement` (append-only).
       required: [id, productId, movementType, quantity, createdByUserId, createdAt]
       properties:
         id:

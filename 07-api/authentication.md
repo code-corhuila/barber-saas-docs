@@ -1,71 +1,84 @@
 # Authentication & Authorization
 
-> Source of truth: `05-architecture/overview.md` §5 (Architectural Principles, P4:
-> Stateless Authentication) and §7 (Cross-cutting concerns). This document restates that
-> decision for the API contracts under `contracts/openapi/` — if the two ever disagree,
-> `05-architecture/overview.md` wins and this file is out of date.
+> How every contract under `contracts/openapi/` authenticates callers. Architecture:
+> `05-architecture/overview.md` §5 (P2, P3) and §7. Rule: course norm 5.3.7 and 5.6.2.
+> Endpoints: `contracts/openapi/auth-service.yaml` (`barber-saas-identity-auth-api`).
 
 ## Mechanism
 
-JWT (JSON Web Token), signed with **HS512** (symmetric, shared-secret HMAC — not RS256).
-There is no public/private key pair and no JWKS endpoint: the signing secret is a server
-side value shared only between the components that issue and validate tokens.
+JWT signed with **RS256**. identity-auth holds the only private key; every other service
+validates with the public key published at `GET /api/v1/auth/jwks`. No service holds the
+private key or a shared secret.
 
-- **Access token**: expires in **24 hours** (86400 seconds).
-- **Refresh token**: expires in **7 days**, single use (rotated on every
-  `POST /auth/refresh` — the previous refresh token is invalidated).
+- **Access token:** expires in **24 hours** (`expiresIn: 86400`).
+- **Refresh token:** opaque, **7 days**, single use — rotated on every
+  `POST /api/v1/auth/refresh`; stored hashed in `identity_auth.refresh_token`.
+- Authentication is stateless: no server-side session and no revocation list. Logout revokes
+  refresh tokens; an access token lives until it expires.
 
-There is no server-side session. Authentication is fully stateless, which is what allows
-the backend to scale horizontally behind a load balancer without session affinity
-(overview.md §5, P4).
+### Claims
 
-## Authentication flow
+| Claim | Content | Required |
+|---|---|---|
+| header `alg` | `RS256` — any other value is rejected | Yes |
+| header `kid` | Key id, matched against the JWKS | Yes |
+| `sub` | User id (UUID), or the service name for a service token | Yes |
+| `exp`, `iat` | Expiration and issue time | Yes |
+| `iss` | `barber-saas-identity-auth-api` | Yes |
+| `role` | One of the four roles below, or `SERVICE` | Yes |
+| `barbershopId` | Tenant (UUID) for `ADMIN_BARBERSHOP` and `BARBER`; absent otherwise | By role |
 
-1. `POST /auth/register` or `POST /auth/login` — returns `accessToken`, `refreshToken`,
-   `expiresIn` (86400) and the authenticated user's summary.
-2. Send `Authorization: Bearer <accessToken>` on every subsequent request.
-3. When the access token expires, `POST /auth/refresh` with the current `refreshToken` to
-   get a new pair. The old refresh token stops being valid the moment this succeeds.
-4. `POST /auth/logout` revokes the current session's refresh token (and optionally all of
-   the user's refresh tokens, via `allDevices: true`).
+## Validation in every service (norm 5.3.7)
 
-See `contracts/openapi/auth-service.yaml` for the exact request/response schemas.
+The api-gateway only checks that a protected route carries a credential (norm 5.6.2).
+**Each service validates the token itself**, because internal calls do not pass through the
+gateway:
+
+1. Algorithm exactly `RS256`; `none`, `HS256` and anything else → `401`.
+2. Signature checked with the JWKS key whose `kid` matches; the key set is cached and reloaded
+   when an unknown `kid` arrives (key rotation).
+3. `exp` and `sub` present and `exp` in the future → otherwise `401`.
+4. The role is checked per operation → `403` when not allowed.
+
+In `develop` the key pair comes from `barber-saas-infra/scripts/dev-keys.sh`
+(`JWT_PUBLIC_KEY` in `.env`); in `qa` and `main` it comes from identity-auth as an environment
+secret (norm 5.9.2, `05-architecture/deployment.md` §6).
+
+## Service tokens
+
+`barber-saas-worker` and `barber-saas-workflow` call domain services with their own token
+(`role: SERVICE`, `sub` = service name), never with a user's token — a user's token can
+expire in the middle of a saga compensation (norm 5.8.2). Service tokens are issued by
+identity-auth and delivered as environment secrets; in `develop`, `dev-keys.sh` writes a
+`SERVICE_TOKEN`. An operation that accepts service tokens says so in its contract.
 
 ## Roles
 
-BarberSaaS defines exactly four roles (overview.md lines 47-48). There is no generic
-`ADMIN` / `USER` / `VIEWER` set — any contract or document using those names is describing
-a different, unrelated system:
+BarberSaaS has exactly four user roles, one per user (`identity_auth.app_user.role`):
 
 | Role | Who |
 |------|-----|
-| `SUPER_ADMIN` | Platform administrator — operates the SaaS itself, not a single barbershop |
-| `ADMIN_BARBERSHOP` | Barbershop owner — manages one tenant (employees, schedules, finance) |
+| `SUPER_ADMIN` | Platform administrator — operates the SaaS, not a single barbershop |
+| `ADMIN_BARBERSHOP` | Barbershop owner — manages one tenant (catalog, staff, schedules, finance) |
 | `BARBER` | Barbershop employee — manages their own appointments and schedule |
 | `CLIENT` | End customer — books and manages their own appointments |
 
-Roles are carried in the JWT and enforced per endpoint via Spring Security's
-`@PreAuthorize` (overview.md §7, "Authentication / Authorization").
+## Multi-tenancy: the tenant comes from the token
 
-## Multi-tenancy: how `barbershop_id` is derived from the JWT
+Every tenant-scoped table carries `barbershop_id` (`06-data/models.md`, ADR-010). In every
+service:
 
-BarberSaaS is multi-tenant, isolated by a `barbershop_id` column on every tenant-scoped
-table (overview.md §5, P1: Tenant Isolation by Design). This isolation is not optional
-per-endpoint behavior — it applies to every request that touches barbershop-scoped data:
+1. The HTTP adapter reads `barbershopId` from the validated token and passes it to the use
+   case as an explicit argument. **No operation accepts the tenant in the path, query or
+   body.**
+2. Every query and write of tenant-scoped data filters by it. A resource of another tenant
+   answers `404`, never `403`, so its existence is not confirmed (`DEC-APPT-01`).
+3. `SUPER_ADMIN` carries no tenant and is refused by tenant-scoped operations; platform-wide
+   work goes through `platform-admin-service.yaml`.
 
-1. The JWT issued at login embeds the user's `barbershop_id` (for `ADMIN_BARBERSHOP`,
-   `BARBER` and `CLIENT` — `SUPER_ADMIN` operates across tenants and is not bound to one).
-2. `JwtAuthenticationFilter` validates the token on every request and populates
-   `TenantContext`, a request-scoped (`ThreadLocal`) holder for the resolved
-   `barbershop_id`.
-3. Every service method that reads or writes barbershop-scoped data validates against
-   `TenantContext` before touching the database — so a request authenticated for one
-   barbershop cannot read or mutate another barbershop's data through the API layer, even
-   if it guesses a valid resource ID belonging to a different tenant.
-4. `TenantContext` is cleared in a `finally` block at the end of the request, so no state
-   leaks between requests handled by the same thread.
+With ADR-004 this filter is repeated in eight services instead of living once in the
+prototype's `TenantContext`; a cross-tenant test is required in every `-api`
+(`06-data/migration-strategy.md` §4).
 
-Any endpoint added to a contract in `contracts/openapi/` that returns or accepts
-barbershop-scoped data must be assumed to go through this same tenant check — a contract
-that omits `barbershop_id` from its request/response shapes is relying on the JWT-derived
-`TenantContext`, not asking the client to supply the tenant explicitly.
+**Open:** a `CLIENT` is platform-wide (`barbershop_id` is `NULL`) and visits several
+barbershops. How a client's request is bound to one barbershop is `open-questions.md` OQ-07.

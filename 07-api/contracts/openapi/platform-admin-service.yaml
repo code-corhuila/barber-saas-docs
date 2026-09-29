@@ -1,80 +1,82 @@
 openapi: 3.1.0
 info:
   title: barber-saas-platform-admin-api
-  version: 1.0.0
+  version: 1.1.0
   license:
     name: MIT
     identifier: MIT
   description: |
-    Servicio del dominio **platform-admin** (`barber-saas-platform-admin-api`, ADR-004): la
-    operación del SaaS por el `SUPER_ADMIN`. Cubre los planes de suscripción, el alta de
-    barberías, su ciclo de vida (activar, suspender, cancelar), la asignación de plan y el
-    estado del periodo de prueba.
+    Service of the **platform-admin** domain (`barber-saas-platform-admin-api`, ADR-004): the
+    operation of the SaaS by the `SUPER_ADMIN`. It covers subscription plans, onboarding
+    barbershops, their lifecycle (activate, suspend, cancel), plan assignment and the trial
+    status.
 
-    **Origen ascendente:** FR-023 (ver todas las barberías), FR-024 (gestionar planes),
-    FR-025 (solo `SUPER_ADMIN` cambia el estado) y FR-026 (vencimiento del trial, aún no
-    implementado), HU-SADMIN-001; FR-004 (el auto-registro elige un plan activo),
-    HU-AUTH-003. Tabla propia de `06-data/models.md` § "Platform Administration":
-    `subscription_plans`. Opera sobre `barbershops` (§ "Barbershop Management") según
-    `DEC-PLAT-01`. Invariantes `INV-SHOP-001` a `INV-SHOP-003` de
-    `02-domain/entities-and-rules.md`. Rutas y campos alineados con
-    `SubscriptionPlanController`, `PublicPlanController` y `SuperAdminBarbershopController`
-    del monolito (`code-corhuila/barber-saas@develop`).
+    1.1.0 — translated to English (ADR-001); table names aligned with `06-data/models.md` §3
+    and §9.
 
-    ## Autenticación
-    JWT Bearer (`_shared.yaml#/components/securitySchemes/bearerAuth`). `SUPER_ADMIN` no está
-    ligado a una barbería (`authentication.md`): aquí `{id}` identifica la barbería que se
-    administra, no un contexto de tenant. Ninguna operación de este contrato la usa un rol de
-    barbería, así que la regla "barbershopId solo del token" no se relaja para ningún tenant.
+    **Upstream origin:** FR-023 (see every barbershop), FR-024 (manage plans), FR-025 (only
+    `SUPER_ADMIN` changes the status) and FR-026 (trial expiration, not implemented yet),
+    HU-SADMIN-001; FR-004 (self-registration picks an active plan), HU-AUTH-003. Own table of
+    `06-data/models.md` §9 (schema `platform_admin`): `subscription_plan`. Operates on
+    `barbershop` (§3) according to `DEC-PLAT-01`. Invariants `INV-SHOP-001` to `INV-SHOP-003`
+    of `02-domain/entities-and-rules.md`. Paths and fields aligned with the prototype's
+    `SubscriptionPlanController`, `PublicPlanController` and `SuperAdminBarbershopController`
+    (`code-corhuila/barber-saas@develop`).
+
+    ## Authentication
+    JWT Bearer, RS256 (`_shared.yaml#/components/securitySchemes/bearerAuth`). `SUPER_ADMIN` is
+    not bound to a barbershop (`authentication.md`): here `{id}` identifies the barbershop being
+    administered, not a tenant context. No barbershop role uses any operation of this contract,
+    so the rule "barbershopId only from the token" is not relaxed for any tenant.
 
     ## Roles
-    | Rol | Qué puede hacer aquí |
+    | Role | What it can do here |
     |---|---|
-    | `SUPER_ADMIN` | Todo lo de `/api/v1/platform/**` |
-    | `ADMIN_BARBERSHOP`, `BARBER`, `CLIENT` | Nada: reciben `403` (FR-025, `INV-SHOP-002`) |
-    | anónimo | Solo `GET /api/v1/plans`, para elegir plan en el auto-registro (FR-004) |
+    | `SUPER_ADMIN` | Everything under `/api/v1/platform/**` |
+    | `ADMIN_BARBERSHOP`, `BARBER`, `CLIENT` | Nothing: they get `403` (FR-025, `INV-SHOP-002`) |
+    | anonymous | Only `GET /api/v1/plans`, to choose a plan during self-registration (FR-004) |
 
-    ## Ciclo de vida de una barbería
+    ## Barbershop lifecycle
     ```
     TRIAL ──▶ ACTIVE ──▶ SUSPENDED ──▶ CANCELLED
       │         │  ▲         │
-      │         │  └─────────┘ (reactivación)
+      │         │  └─────────┘ (reactivation)
       │         └──────────────────▶ CANCELLED
-      └──▶ SUSPENDED (trial vencido sin conversión)
+      └──▶ SUSPENDED (trial expired without conversion)
     ```
-    Tabla de transiciones en `entities-and-rules.md`, "Entity: Barbershop". `CANCELLED` es
-    terminal. Una barbería no se borra por API: el `DELETE` del monolito borraba en cascada
-    todos los datos del tenant sin recuperación (`data-dictionary.md`, "Deletion model"); aquí
-    la baja es `CANCELLED`.
+    Transition table in `entities-and-rules.md`, "Entity: Barbershop". `CANCELLED` is terminal.
+    A barbershop is not deleted through the API: the prototype's `DELETE` cascaded over all of
+    the tenant's data with no recovery (`data-dictionary.md`, "Deletion model"); here closing a
+    barbershop means `CANCELLED`.
 
-    ## Decisiones de diseño de este contrato
+    ## Design decisions of this contract
 
-    ### DEC-PLAT-01 · platform-admin opera la barbería; barbershop guarda la fila
-    `barbershops` es de la base de barbershop (ADR-004). Por la regla de oro 8, este servicio
-    no la lee ni la escribe directamente: el alta, el cambio de estado y la asignación de plan
-    se aplican a través de `barber-saas-barbershop-api`. Esa interfaz entre servicios aún no
-    está contratada (`open-questions.md` OQ-10).
+    ### DEC-PLAT-01 · platform-admin operates the barbershop; barbershop keeps the row
+    `barbershop` belongs to barbershop's database (ADR-004). By norm 7.3 this service neither
+    reads nor writes it directly: onboarding, status changes and plan assignment are applied
+    through `barber-saas-barbershop-api` with a service token. That service-to-service interface
+    is not contracted yet (`open-questions.md` OQ-10).
 
-    ### DEC-PLAT-02 · El plan asignado siempre está activo
-    Asignar un plan inactivo responde `422` (`INV-SHOP-003`). Desactivar un plan que aún tiene
-    barberías asignadas también responde `422`, porque dejaría a esas barberías violando el
-    mismo invariante.
+    ### DEC-PLAT-02 · The assigned plan is always active
+    Assigning an inactive plan answers `422` (`INV-SHOP-003`). Deactivating a plan that still
+    has barbershops assigned also answers `422`, because it would leave those barbershops
+    breaking the same invariant.
 
-    ### DEC-PLAT-03 · `trialEndsAt` es derivado
-    `INV-SHOP-001` fija `trialEndsAt = createdAt + 60 días`, pero `barbershops` no tiene esa
-    columna en 06. Este contrato la expone como campo calculado de solo lectura, sin inventar
-    una columna (OQ-11).
+    ### DEC-PLAT-03 · `trialEndsAt` is read, not computed
+    `INV-SHOP-001` fixes `trialEndsAt = createdAt + 60 days` once, when the barbershop is
+    registered, and `barbershop.trial_ends_at` stores it (`06-data/models.md` §3, OQ-11 closed).
+    This contract exposes it read-only, as barbershop delivers it (OQ-10).
 
 servers:
-  - url: http://localhost:8080
-    description: api-gateway local (única entrada, norma 5.6.1) — las rutas incluyen `/api/v1`
+  - url: http://localhost:8000
+    description: Local api-gateway (single entry, norm 5.6.1) — paths include `/api/v1`
   - url: https://api.dev.{domain}
-    description: api-gateway del entorno de desarrollo
+    description: Development api-gateway
     variables:
       domain:
         default: example.com
   - url: https://api.{domain}
-    description: api-gateway de producción
+    description: Production api-gateway
     variables:
       domain:
         default: example.com
@@ -84,26 +86,26 @@ security:
 
 tags:
   - name: Plans
-    description: Planes de suscripción (`subscription_plans`)
+    description: Subscription plans (`subscription_plan`)
   - name: Barbershops
-    description: Alta, ciclo de vida, plan y trial de las barberías
+    description: Onboarding, lifecycle, plan and trial of barbershops
   - name: Health
-    description: Health check del servicio
+    description: Service health check
 
 paths:
   /health:
     get:
       summary: Health check
-      description: Sonda interna para `barber-saas-infra`; no se publica en el api-gateway.
+      description: Internal probe for `barber-saas-infra`; not published through the api-gateway.
       operationId: healthCheck
       tags: [Health]
       security: []
       servers:
-        - url: http://barber-saas-platform-admin-api:8080
-          description: Red interna de compose
+        - url: http://platform-admin-api:8080
+          description: Internal compose network
       responses:
         '200':
-          description: Servicio saludable
+          description: Service healthy
           content:
             application/json:
               schema:
@@ -116,10 +118,10 @@ paths:
     parameters:
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Planes activos (público)
+      summary: Active plans (public)
       description: |
-        Lectura anónima para el auto-registro de barberías (FR-004, `PublicPlanController`).
-        Solo planes con `isActive = true`. Orden: precio ascendente.
+        Anonymous read for barbershop self-registration (FR-004, `PublicPlanController`). Only
+        plans with `isActive = true`. Order: ascending price.
       operationId: listActivePlans
       tags: [Plans]
       security: []
@@ -128,7 +130,7 @@ paths:
         - $ref: './_shared.yaml#/components/parameters/LimitParam'
       responses:
         '200':
-          description: Página de planes activos
+          description: Page of active plans
           content:
             application/json:
               schema:
@@ -142,8 +144,8 @@ paths:
     parameters:
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Listar todos los planes
-      description: 'Rol: `SUPER_ADMIN`. Incluye inactivos.'
+      summary: List every plan
+      description: 'Role: `SUPER_ADMIN`. Includes inactive ones.'
       operationId: listPlans
       tags: [Plans]
       parameters:
@@ -151,12 +153,12 @@ paths:
         - $ref: './_shared.yaml#/components/parameters/LimitParam'
         - name: isActive
           in: query
-          description: Filtrar por estado de activación
+          description: Filter by activation state
           schema:
             type: boolean
       responses:
         '200':
-          description: Página de planes
+          description: Page of plans
           content:
             application/json:
               schema:
@@ -170,8 +172,8 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
     post:
-      summary: Crear un plan de suscripción
-      description: 'Rol: `SUPER_ADMIN` (FR-024). Se crea activo.'
+      summary: Create a subscription plan
+      description: 'Role: `SUPER_ADMIN` (FR-024). Created active.'
       operationId: createPlan
       tags: [Plans]
       parameters:
@@ -189,7 +191,7 @@ paths:
               featuresJson: '{"loyalty":true,"inventory":true}'
       responses:
         '201':
-          description: Plan creado
+          description: Plan created
           headers:
             Location:
               $ref: './_shared.yaml#/components/headers/Location'
@@ -200,7 +202,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SubscriptionPlan'
         '200':
-          description: Reintento con el mismo `Idempotency-Key`; devuelve el plan ya creado.
+          description: Retry with the same `Idempotency-Key`; returns the plan already created.
           content:
             application/json:
               schema:
@@ -219,13 +221,13 @@ paths:
       - $ref: './_shared.yaml#/components/parameters/IdParam'
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Obtener un plan
-      description: 'Rol: `SUPER_ADMIN`.'
+      summary: Get a plan
+      description: 'Role: `SUPER_ADMIN`.'
       operationId: getPlanById
       tags: [Plans]
       responses:
         '200':
-          description: Plan encontrado
+          description: Plan found
           content:
             application/json:
               schema:
@@ -239,10 +241,10 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
     put:
-      summary: Actualizar un plan
+      summary: Update a plan
       description: |
-        Rol: `SUPER_ADMIN` (FR-024). Cambiar `priceCents` o `maxBarbers` aplica a las barberías
-        que ya lo tienen asignado; este contrato no versiona precios.
+        Role: `SUPER_ADMIN` (FR-024). Changing `priceCents` or `maxBarbers` applies to the
+        barbershops that already have it assigned; this contract does not version prices.
       operationId: updatePlan
       tags: [Plans]
       requestBody:
@@ -253,7 +255,7 @@ paths:
               $ref: '#/components/schemas/CreateSubscriptionPlanRequest'
       responses:
         '200':
-          description: Plan actualizado
+          description: Plan updated
           content:
             application/json:
               schema:
@@ -269,16 +271,16 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
     delete:
-      summary: Desactivar un plan
+      summary: Deactivate a plan
       description: |
-        Rol: `SUPER_ADMIN`. No borra la fila: pone `isActive = false` (como el monolito y el
-        patrón `is_active` de `data-dictionary.md`), así que deja de aparecer en
+        Role: `SUPER_ADMIN`. Does not delete the row: sets `isActive = false` (as the prototype
+        did, and the `is_active` pattern of `data-dictionary.md`), so it stops appearing in
         `GET /api/v1/plans`.
       operationId: deactivatePlan
       tags: [Plans]
       responses:
         '204':
-          description: Plan desactivado
+          description: Plan deactivated
         '401':
           $ref: './_shared.yaml#/components/responses/Unauthorized'
         '403':
@@ -286,14 +288,14 @@ paths:
         '404':
           $ref: './_shared.yaml#/components/responses/NotFound'
         '422':
-          description: El plan aún tiene barberías asignadas (`DEC-PLAT-02`, `INV-SHOP-003`).
+          description: The plan still has barbershops assigned (`DEC-PLAT-02`, `INV-SHOP-003`).
           content:
             application/json:
               schema:
                 $ref: './_shared.yaml#/components/schemas/ErrorResponse'
               example:
                 error: BUSINESS_RULE_VIOLATION
-                message: El plan Pro tiene 12 barberías asignadas; reasígnelas antes de desactivarlo.
+                message: The Pro plan has 12 barbershops assigned; reassign them before deactivating it
                 traceId: 550e8400-e29b-41d4-a716-446655440000
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
@@ -303,8 +305,8 @@ paths:
     parameters:
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Listar todas las barberías de la plataforma
-      description: 'Rol: `SUPER_ADMIN` (FR-023). Todas, en cualquier estado. Orden: más reciente primero.'
+      summary: List every barbershop of the platform
+      description: 'Role: `SUPER_ADMIN` (FR-023). All of them, in any status. Order: most recent first.'
       operationId: listPlatformBarbershops
       tags: [Barbershops]
       parameters:
@@ -312,23 +314,23 @@ paths:
         - $ref: './_shared.yaml#/components/parameters/LimitParam'
         - name: status
           in: query
-          description: Filtrar por estado
+          description: Filter by status
           schema:
             $ref: '#/components/schemas/BarbershopStatus'
         - name: planId
           in: query
-          description: Filtrar por plan
+          description: Filter by plan
           schema:
             $ref: './_shared.yaml#/components/schemas/UUID'
         - name: city
           in: query
-          description: Filtrar por ciudad exacta
+          description: Filter by exact city
           schema:
             type: string
             maxLength: 80
       responses:
         '200':
-          description: Página de barberías
+          description: Page of barbershops
           content:
             application/json:
               schema:
@@ -342,12 +344,13 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
     post:
-      summary: Dar de alta una barbería
+      summary: Onboard a barbershop
       description: |
-        Rol: `SUPER_ADMIN`. Nace en `TRIAL` con el trial de 60 días contando desde ahora
-        (`INV-SHOP-001`); el plan debe estar activo (`INV-SHOP-003`). El administrador inicial
-        se crea aparte en identity-auth (el `POST .../owner` del monolito escribía en `users`).
-        El auto-registro del dueño (FR-004) va por `auth-service.yaml`.
+        Role: `SUPER_ADMIN`. It starts in `TRIAL` with the 60-day trial counting from now
+        (`INV-SHOP-001`); the plan must be active (`INV-SHOP-003`). The initial administrator is
+        created separately in identity-auth (the prototype's `POST .../owner` wrote to `users`).
+        The owner's self-registration (FR-004) is the owner-onboarding saga of
+        `barber-saas-workflow` (`open-questions.md` OQ-12).
       operationId: createPlatformBarbershop
       tags: [Barbershops]
       parameters:
@@ -359,14 +362,14 @@ paths:
             schema:
               $ref: '#/components/schemas/CreatePlatformBarbershopRequest'
             example:
-              name: Barbería El Clásico
+              name: El Clásico Barbershop
               address: 'Calle 8 # 5-20'
               city: Neiva
               phone: '+573001112233'
               planId: 5b1f0c3e-2a4d-4e6f-8a9b-0c1d2e3f4a5b
       responses:
         '201':
-          description: Barbería creada en `TRIAL`
+          description: Barbershop created in `TRIAL`
           headers:
             Location:
               $ref: './_shared.yaml#/components/headers/Location'
@@ -377,7 +380,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlatformBarbershop'
         '200':
-          description: Reintento con el mismo `Idempotency-Key`; devuelve la barbería ya creada.
+          description: Retry with the same `Idempotency-Key`; returns the barbershop already created.
           content:
             application/json:
               schema:
@@ -389,7 +392,7 @@ paths:
         '403':
           $ref: './_shared.yaml#/components/responses/Forbidden'
         '404':
-          description: El `planId` no existe.
+          description: The `planId` does not exist.
           content:
             application/json:
               schema:
@@ -404,13 +407,13 @@ paths:
       - $ref: './_shared.yaml#/components/parameters/IdParam'
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Detalle de una barbería
-      description: 'Rol: `SUPER_ADMIN`. Cualquier estado.'
+      summary: Detail of a barbershop
+      description: 'Role: `SUPER_ADMIN`. Any status.'
       operationId: getPlatformBarbershopById
       tags: [Barbershops]
       responses:
         '200':
-          description: Barbería encontrada
+          description: Barbershop found
           content:
             application/json:
               schema:
@@ -429,11 +432,11 @@ paths:
       - $ref: './_shared.yaml#/components/parameters/IdParam'
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     patch:
-      summary: Cambiar el estado de una barbería (activar, suspender, cancelar)
+      summary: Change a barbershop's status (activate, suspend, cancel)
       description: |
-        Rol: `SUPER_ADMIN` exclusivamente (FR-025, `INV-SHOP-002`, HU-SADMIN-001 escenarios 1
-        y 2). Solo se aceptan las transiciones del ciclo de vida de `info.description`; volver
-        a `TRIAL` nunca es válido.
+        Role: `SUPER_ADMIN` only (FR-025, `INV-SHOP-002`, HU-SADMIN-001 scenarios 1 and 2). Only
+        the lifecycle transitions of `info.description` are accepted; going back to `TRIAL` is
+        never valid.
       operationId: updateBarbershopStatus
       tags: [Barbershops]
       requestBody:
@@ -446,7 +449,7 @@ paths:
               status: ACTIVE
       responses:
         '200':
-          description: Estado actualizado
+          description: Status updated
           content:
             application/json:
               schema:
@@ -456,26 +459,26 @@ paths:
         '401':
           $ref: './_shared.yaml#/components/responses/Unauthorized'
         '403':
-          description: El rol no es `SUPER_ADMIN` (`INV-SHOP-002`).
+          description: The role is not `SUPER_ADMIN` (`INV-SHOP-002`).
           content:
             application/json:
               schema:
                 $ref: './_shared.yaml#/components/schemas/ErrorResponse'
               example:
                 error: FORBIDDEN
-                message: Solo el administrador de la plataforma puede cambiar el estado de una barbería.
+                message: Only the platform administrator can change a barbershop's status
                 traceId: 550e8400-e29b-41d4-a716-446655440000
         '404':
           $ref: './_shared.yaml#/components/responses/NotFound'
         '422':
-          description: La transición no está permitida desde el estado actual (por ejemplo, salir de `CANCELLED`).
+          description: The transition is not allowed from the current status (for example, leaving `CANCELLED`).
           content:
             application/json:
               schema:
                 $ref: './_shared.yaml#/components/schemas/ErrorResponse'
               example:
                 error: INVALID_STATUS_TRANSITION
-                message: Una barbería CANCELLED no puede volver a ACTIVE.
+                message: A CANCELLED barbershop cannot go back to ACTIVE
                 traceId: 550e8400-e29b-41d4-a716-446655440000
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
@@ -485,8 +488,8 @@ paths:
       - $ref: './_shared.yaml#/components/parameters/IdParam'
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     put:
-      summary: Asignar un plan a una barbería
-      description: 'Rol: `SUPER_ADMIN`. El plan debe estar activo (`INV-SHOP-003`, `DEC-PLAT-02`).'
+      summary: Assign a plan to a barbershop
+      description: 'Role: `SUPER_ADMIN`. The plan must be active (`INV-SHOP-003`, `DEC-PLAT-02`).'
       operationId: assignBarbershopPlan
       tags: [Barbershops]
       requestBody:
@@ -497,7 +500,7 @@ paths:
               $ref: '#/components/schemas/AssignPlanRequest'
       responses:
         '200':
-          description: Plan asignado
+          description: Plan assigned
           content:
             application/json:
               schema:
@@ -509,7 +512,7 @@ paths:
         '403':
           $ref: './_shared.yaml#/components/responses/Forbidden'
         '404':
-          description: La barbería o el plan no existen.
+          description: The barbershop or the plan does not exist.
           content:
             application/json:
               schema:
@@ -524,17 +527,17 @@ paths:
       - $ref: './_shared.yaml#/components/parameters/IdParam'
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Estado del periodo de prueba de una barbería
+      summary: Trial status of a barbershop
       description: |
-        Rol: `SUPER_ADMIN`. Sirve para la conversión manual de trial a pago (HU-SADMIN-001
-        escenario 1). El paso automático a `SUSPENDED` al vencer (FR-026) es un job de
-        `barber-saas-worker`, no un endpoint, y sigue sin implementarse (HU-SADMIN-001
-        escenario 3).
+        Role: `SUPER_ADMIN`. Used for the manual conversion from trial to paid (HU-SADMIN-001
+        scenario 1). The automatic move to `SUSPENDED` on expiry (FR-026) is a job of
+        `barber-saas-worker`, not an endpoint, and is still not implemented (HU-SADMIN-001
+        scenario 3).
       operationId: getBarbershopTrial
       tags: [Barbershops]
       responses:
         '200':
-          description: Estado del trial
+          description: Trial status
           content:
             application/json:
               schema:
@@ -558,14 +561,14 @@ paths:
 components:
   responses:
     InactivePlan:
-      description: El plan indicado está inactivo (`INV-SHOP-003`).
+      description: The given plan is inactive (`INV-SHOP-003`).
       content:
         application/json:
           schema:
             $ref: './_shared.yaml#/components/schemas/ErrorResponse'
           example:
             error: BUSINESS_RULE_VIOLATION
-            message: El plan seleccionado no está activo.
+            message: The selected plan is not active
             traceId: 550e8400-e29b-41d4-a716-446655440000
 
   schemas:
@@ -583,9 +586,9 @@ components:
     SubscriptionPlan:
       type: object
       description: |
-        Tabla `subscription_plans`. Los nombres y precios semilla de 06 (Basico/Pro/Premium)
-        no coinciden con `01-context` (Starter/Profesional/Premium); inconsistencia ya marcada
-        en `06-data/models.md`, no resuelta aquí.
+        Table `subscription_plan`. The seed names and prices of 06 (Basico/Pro/Premium) do not
+        match `01-context` (Starter/Profesional/Premium); the inconsistency is already flagged in
+        `06-data/models.md` §9, not resolved here.
       required: [id, name, priceCents, maxBarbers, isActive, createdAt]
       properties:
         id:
@@ -596,15 +599,15 @@ components:
           example: Pro
         priceCents:
           $ref: './_shared.yaml#/components/schemas/Money'
-          description: Precio mensual en centavos de COP (`subscription_plans.price`). Ver OQ-06.
+          description: Monthly price in COP cents (column `price_cents`, ADR-010).
         maxBarbers:
           type: integer
           minimum: 1
-          description: Tope de barberos; 999 equivale a ilimitado en la semilla de 06.
+          description: Barber cap; 999 means unlimited in the seed of 06.
         featuresJson:
           type: [string, 'null']
           contentMediaType: application/json
-          description: Columna `features_json` (JSON), serializada como texto, igual que en el monolito.
+          description: Column `features_json` (`jsonb`), serialized as text, as in the prototype.
         isActive:
           type: boolean
         createdAt:
@@ -641,14 +644,14 @@ components:
     # ─── Barbershops ────────────────────────────────────────────────────
     BarbershopStatus:
       type: string
-      description: Enum de `barbershops.status` (06).
+      description: Same values as `chk_barbershop_status` (06).
       enum: [TRIAL, ACTIVE, SUSPENDED, CANCELLED]
 
     PlatformBarbershop:
       type: object
       description: |
-        Vista de administración de la tabla `barbershops` (DEC-PLAT-01), con `trialEndsAt`
-        derivado (DEC-PLAT-03).
+        Administration view of the table `barbershop` (DEC-PLAT-01), with the stored
+        `trialEndsAt` (DEC-PLAT-03).
       required: [id, name, city, status, timezone, cancellationPolicyHours, trialEndsAt, createdAt, updatedAt]
       properties:
         id:
@@ -695,7 +698,7 @@ components:
         trialEndsAt:
           $ref: './_shared.yaml#/components/schemas/Timestamp'
           readOnly: true
-          description: '`createdAt + 60 días`, inmutable (`INV-SHOP-001`). Sin columna en 06 (OQ-11).'
+          description: '`createdAt + 60 days`, immutable (`INV-SHOP-001`, column `trial_ends_at`).'
         createdAt:
           $ref: './_shared.yaml#/components/schemas/Timestamp'
         updatedAt:
@@ -703,7 +706,7 @@ components:
 
     CreatePlatformBarbershopRequest:
       type: object
-      description: 'Campos de `BarbershopRequest` del monolito. Sin `status`, siempre nace en `TRIAL`.'
+      description: 'Fields of the prototype''s `BarbershopRequest`. No `status`: it always starts in `TRIAL`.'
       additionalProperties: false
       required: [name, city, phone, planId]
       properties:
@@ -755,7 +758,7 @@ components:
       properties:
         status:
           type: string
-          description: Estado destino; `TRIAL` no es un destino válido.
+          description: Target status; `TRIAL` is not a valid target.
           enum: [ACTIVE, SUSPENDED, CANCELLED]
 
     AssignPlanRequest:
@@ -768,7 +771,7 @@ components:
 
     TrialStatus:
       type: object
-      description: Derivado de `barbershops.created_at` y `status` (DEC-PLAT-03).
+      description: Computed from `barbershop.trial_ends_at` and `status` (DEC-PLAT-03).
       required: [barbershopId, status, trialStartedAt, trialEndsAt, daysRemaining, expired]
       properties:
         barbershopId:
@@ -782,10 +785,10 @@ components:
         daysRemaining:
           type: integer
           minimum: 0
-          description: 0 si ya venció.
+          description: 0 once it has expired.
         expired:
           type: boolean
-          description: '`true` si `trialEndsAt` ya pasó, aunque el estado aún no se haya actualizado (FR-026 no implementado).'
+          description: '`true` if `trialEndsAt` has passed, even if the status has not been updated yet (FR-026 not implemented).'
 
     PlatformBarbershopPage:
       allOf:

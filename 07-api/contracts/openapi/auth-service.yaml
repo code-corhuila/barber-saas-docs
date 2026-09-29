@@ -1,51 +1,83 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
-  title: Auth Service API
-  version: 1.0.0
+  title: barber-saas-identity-auth-api
+  version: 2.0.0
+  license:
+    name: MIT
+    identifier: MIT
   description: |
-    Authentication service: registration, login, token refresh and session management.
+    Service of the **identity-auth** domain (`barber-saas-identity-auth-api`, ADR-004): client
+    registration, login, token refresh and logout, password reset, and publication of the
+    public key every other service uses to validate tokens.
 
-    ## Authentication flow
-    1. `POST /auth/register` — create account
-    2. `POST /auth/login` — get access_token + refresh_token
-    3. Use `access_token` in the `Authorization: Bearer` header for every other endpoint
-    4. When the access_token expires (24h): `POST /auth/refresh` with the refresh_token
-    5. To log out: `POST /auth/logout`
+    **Upstream origin:** FR-001/FR-002 (registration and login), FR-003 (password recovery).
+    Tables `identity_auth.app_user`, `refresh_token`, `password_reset_token` in
+    `06-data/models.md` §2. Mechanism in `07-api/authentication.md`.
 
-    ## Tokens
-    - **access_token**: JWT HS512, expires in 24 hours. Includes userId, email, roles, permissions.
-    - **refresh_token**: Opaque token (UUID), expires in 7 days. Single-use (rotated).
+    2.0.0 — RS256 with a published JWKS (norm 5.3.7), one role per user, paths under
+    `/api/v1/auth`, closed error codes, no Redis dependency.
+
+    ## Flow
+    1. `POST /api/v1/auth/register` — a `CLIENT` creates their account.
+    2. `POST /api/v1/auth/login` — returns `accessToken` (JWT RS256, 24 h) and `refreshToken`
+       (opaque, 7 days, single use).
+    3. Every other call sends `Authorization: Bearer <accessToken>`; each service validates it
+       with the key from `GET /api/v1/auth/jwks`.
+    4. `POST /api/v1/auth/refresh` rotates both tokens; `POST /api/v1/auth/logout` revokes.
+
+    ## Design decisions of this contract
+
+    ### DEC-AUTH-01 · Self-registration creates `CLIENT` accounts only
+    Staff accounts (`ADMIN_BARBERSHOP`, `BARBER`) belong to a barbershop that lives in another
+    domain. Onboarding an owner together with a new barbershop in `TRIAL` is a cross-domain
+    process for `barber-saas-workflow` (FR-004, `open-questions.md` OQ-12), not a field of this
+    request.
+
+    ### DEC-AUTH-02 · Login failures look the same
+    Wrong email, wrong password, inactive account and temporary lockout all answer
+    `401 UNAUTHORIZED` with the same message, so the endpoint cannot be used to discover
+    accounts. Brute force is throttled by the api-gateway (`429`, OQ-01).
+
+    ### DEC-AUTH-03 · Password reset never reveals whether the email exists
+    `POST /password-reset` always answers `202`; the 6-digit code (15 minutes, single use) is
+    sent only if the account exists.
 
 servers:
-  - url: http://localhost:8081
-    description: Local development
-  - url: https://api.dev.{domain}/api/v1/auth
-    description: Development
+  - url: http://localhost:8000
+    description: Local api-gateway (single entry, norm 5.6.1) — paths include `/api/v1`
+  - url: https://api.dev.{domain}
+    description: Development api-gateway
     variables:
       domain:
         default: example.com
-  - url: https://api.{domain}/api/v1/auth
-    description: Production
+  - url: https://api.{domain}
+    description: Production api-gateway
     variables:
       domain:
         default: example.com
 
-security: []  # Most of these endpoints are public
+security: []
 
 tags:
   - name: Auth
     description: Registration, login and session management
+  - name: Password
+    description: Password recovery with an e-mailed code
   - name: Keys
-    description: Public keys for token verification
+    description: Public key for token validation
   - name: Health
-    description: Service status
+    description: Service health check
 
 paths:
   /health:
     get:
       summary: Health check
+      description: Internal probe for `barber-saas-infra`; not published through the api-gateway.
+      operationId: healthCheck
       tags: [Health]
-      security: []
+      servers:
+        - url: http://identity-auth-api:8080
+          description: Internal compose network
       responses:
         '200':
           description: Service healthy
@@ -53,26 +85,26 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [status]
                 properties:
                   status:
                     type: string
                     enum: [ok]
-                  db:
-                    type: string
-                    enum: [connected, disconnected]
-                  redis:
-                    type: string
-                    enum: [connected, disconnected]
-              example:
-                status: ok
-                db: connected
-                redis: connected
+                  timestamp:
+                    $ref: './_shared.yaml#/components/schemas/Timestamp'
+        '503':
+          $ref: './_shared.yaml#/components/responses/ServiceUnavailable'
 
-  /register:
+  /api/v1/auth/register:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     post:
-      summary: Register a new user
+      summary: Register a client account
+      description: Creates an `app_user` with role `CLIENT` and no barbershop (`DEC-AUTH-01`), and logs it in.
       operationId: register
       tags: [Auth]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdempotencyKeyHeader'
       requestBody:
         required: true
         content:
@@ -80,31 +112,48 @@ paths:
             schema:
               $ref: '#/components/schemas/RegisterRequest'
             example:
-              email: usuario@example.com
-              password: "SecurePass123!"
-              name: "María García"
+              fullName: María García
+              email: maria@example.com
+              password: SecurePass123
+              phone: '+573001234567'
       responses:
         '201':
-          description: User registered successfully
+          description: Account created and logged in
+          headers:
+            Location:
+              $ref: './_shared.yaml#/components/headers/Location'
+            X-Correlation-Id:
+              $ref: './_shared.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '200':
+          description: Retry with the same `Idempotency-Key`; returns the same account and new tokens.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          description: The email is already registered
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '422':
+          description: The email is already registered.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
               example:
-                error: EMAIL_ALREADY_EXISTS
+                error: BUSINESS_RULE_VIOLATION
                 message: The email is already registered
+                traceId: 550e8400-e29b-41d4-a716-446655440000
+        '500':
+          $ref: './_shared.yaml#/components/responses/InternalError'
 
-  /login:
+  /api/v1/auth/login:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     post:
-      summary: Authenticate a user
+      summary: Log in
       operationId: login
       tags: [Auth]
       requestBody:
@@ -113,35 +162,34 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/LoginRequest'
-            example:
-              email: usuario@example.com
-              password: "SecurePass123!"
       responses:
         '200':
-          description: Successful login
+          description: Logged in
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
         '401':
-          description: Invalid credentials
+          description: Invalid credentials, inactive or temporarily locked account (`DEC-AUTH-02`).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
               example:
-                error: INVALID_CREDENTIALS
+                error: UNAUTHORIZED
                 message: Incorrect email or password
-        '423':
-          description: Account temporarily locked due to failed attempts
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                traceId: 550e8400-e29b-41d4-a716-446655440000
+        '429':
+          $ref: './_shared.yaml#/components/responses/TooManyRequests'
 
-  /refresh:
+  /api/v1/auth/refresh:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     post:
-      summary: Refresh the access token
+      summary: Rotate the tokens
+      description: The refresh token is single use; the one sent is revoked (`refresh_token.revoked_at`).
       operationId: refreshToken
       tags: [Auth]
       requestBody:
@@ -150,28 +198,36 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [refreshToken]
               properties:
                 refreshToken:
                   type: string
-                  description: Refresh token obtained at login or from the last refresh
       responses:
         '200':
-          description: Tokens refreshed (the previous refresh token is no longer valid)
+          description: New access and refresh tokens
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
         '401':
-          description: Refresh token invalid, expired, or already used
+          description: Refresh token invalid, expired, revoked or already used.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
 
-  /logout:
+  /api/v1/auth/logout:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     post:
       summary: Log out
+      description: |
+        Revokes the given refresh token, or all of the user's refresh tokens with
+        `allDevices: true`. The access token stays valid until it expires (at most 24 h);
+        there is no revocation list (stateless validation in every service).
       operationId: logout
       tags: [Auth]
       security:
@@ -182,27 +238,99 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
                 refreshToken:
                   type: string
-                  description: If provided, also revokes that refresh token
                 allDevices:
                   type: boolean
-                  description: If true, revokes all of the user's refresh tokens
                   default: false
       responses:
         '204':
-          description: Session closed successfully
+          description: Session closed
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: './_shared.yaml#/components/responses/Unauthorized'
 
-  /jwks:
+  /api/v1/auth/password-reset:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    post:
+      summary: Request a password-reset code
+      description: Always `202` (`DEC-AUTH-03`). Writes `PasswordResetRequested` to the outbox; notifications sends the e-mail.
+      operationId: requestPasswordReset
+      tags: [Password]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  maxLength: 150
+      responses:
+        '202':
+          description: Request accepted
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '429':
+          $ref: './_shared.yaml#/components/responses/TooManyRequests'
+
+  /api/v1/auth/password-reset/confirm:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    post:
+      summary: Set a new password with the code
+      description: Marks the code as used and revokes every refresh token of the user.
+      operationId: confirmPasswordReset
+      tags: [Password]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, code, newPassword]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  maxLength: 150
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+                newPassword:
+                  $ref: '#/components/schemas/Password'
+      responses:
+        '204':
+          description: Password changed
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
+        '422':
+          description: Code invalid, expired or already used.
+          content:
+            application/json:
+              schema:
+                $ref: './_shared.yaml#/components/schemas/ErrorResponse'
+              example:
+                error: BUSINESS_RULE_VIOLATION
+                message: The code is invalid or has expired
+                traceId: 550e8400-e29b-41d4-a716-446655440000
+
+  /api/v1/auth/jwks:
     get:
-      summary: Public keys for token verification (JWKS)
-      description: Standard JWKS endpoint so other services can verify tokens without calling auth-service.
+      summary: Public key set (JWKS)
+      description: |
+        RFC 7517 key set with the RS256 public key(s) that sign access tokens. Every service
+        loads it to validate tokens without calling this service per request (norm 5.3.7).
+        During key rotation it lists the current and the previous key, told apart by `kid`.
       operationId: getJwks
       tags: [Keys]
-      security: []
       responses:
         '200':
           description: JSON Web Key Set
@@ -210,42 +338,71 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [keys]
                 properties:
                   keys:
                     type: array
                     items:
                       type: object
-                      description: JWK (RFC 7517)
+                      required: [kty, kid, use, alg, n, e]
+                      properties:
+                        kty:
+                          const: RSA
+                        kid:
+                          type: string
+                        use:
+                          const: sig
+                        alg:
+                          const: RS256
+                        n:
+                          type: string
+                        e:
+                          type: string
 
 components:
   schemas:
+    Role:
+      type: string
+      description: Exactly one per user. Same values as `chk_app_user_role`.
+      enum: [SUPER_ADMIN, ADMIN_BARBERSHOP, BARBER, CLIENT]
+
+    Password:
+      type: string
+      minLength: 8
+      maxLength: 100
+      description: At least 8 characters, one uppercase letter and one digit. Stored only as a BCrypt hash.
+
     RegisterRequest:
       type: object
-      required: [email, password, name]
+      additionalProperties: false
+      required: [fullName, email, password]
       properties:
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 120
         email:
           type: string
           format: email
-          maxLength: 255
+          maxLength: 150
         password:
+          $ref: '#/components/schemas/Password'
+        phone:
           type: string
-          minLength: 8
-          maxLength: 100
-          description: Minimum 8 characters, one uppercase letter, one number
-        name:
-          type: string
-          minLength: 1
-          maxLength: 100
+          maxLength: 20
 
     LoginRequest:
       type: object
+      additionalProperties: false
       required: [email, password]
       properties:
         email:
           type: string
           format: email
+          maxLength: 150
         password:
           type: string
+          maxLength: 100
 
     AuthResponse:
       type: object
@@ -253,10 +410,10 @@ components:
       properties:
         accessToken:
           type: string
-          description: JWT HS512. Include in the Authorization Bearer header for authenticated requests.
+          description: JWT signed with RS256. Claims in `authentication.md`.
         refreshToken:
           type: string
-          description: Opaque token. Use in POST /refresh when the access token expires.
+          description: Opaque, single use, valid 7 days.
         expiresIn:
           type: integer
           description: Seconds until the access token expires
@@ -266,43 +423,33 @@ components:
 
     UserSummary:
       type: object
-      required: [id, email, roles]
+      description: Public view of `identity_auth.app_user` (never the password hash).
+      required: [id, fullName, email, role, barbershopId, isActive]
       properties:
         id:
           $ref: './_shared.yaml#/components/schemas/UUID'
+        fullName:
+          type: string
+          maxLength: 120
         email:
           type: string
           format: email
-        name:
-          type: string
-        roles:
-          type: array
-          items:
-            type: string
-            enum: [ADMIN_BARBERSHOP, BARBER, CLIENT, SUPER_ADMIN]
-        permissions:
-          type: array
-          items:
-            type: string
-            description: Format "[resource]:[action]"
-          example: ["appointment:read", "appointment:write"]
-
-    ErrorResponse:
-      $ref: './_shared.yaml#/components/schemas/ErrorResponse'
-
-  responses:
-    BadRequest:
-      description: Validation error
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    Unauthorized:
-      description: Invalid or expired token
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
+          maxLength: 150
+        phone:
+          type: [string, 'null']
+          maxLength: 20
+        profilePhotoUrl:
+          type: [string, 'null']
+          format: uri
+        role:
+          $ref: '#/components/schemas/Role'
+        barbershopId:
+          description: Set for `ADMIN_BARBERSHOP` and `BARBER`; `null` for `SUPER_ADMIN` and `CLIENT`.
+          anyOf:
+            - $ref: './_shared.yaml#/components/schemas/UUID'
+            - type: 'null'
+        isActive:
+          type: boolean
 
   securitySchemes:
     bearerAuth:

@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: "[ServiceName] API"
+  title: "barber-saas-[domain]-api"
   version: 1.0.0
   description: |
     API of the [service-name] service.
@@ -18,25 +18,18 @@ info:
     List endpoints support pagination via `?page=1&limit=20`.
 
 servers:
-  - url: http://localhost:{port}
-    description: Local development
-    variables:
-      port:
-        default: '3001'
-  - url: https://api.dev.{domain}/v1/{service}
-    description: Development environment
+  - url: http://localhost:8000
+    description: Local api-gateway (single entry, norm 5.6.1) — paths include `/api/v1`
+  - url: https://api.dev.{domain}
+    description: Development api-gateway
     variables:
       domain:
         default: example.com
-      service:
-        default: service-name
-  - url: https://api.{domain}/v1/{service}
-    description: Production
+  - url: https://api.{domain}
+    description: Production api-gateway
     variables:
       domain:
         default: example.com
-      service:
-        default: service-name
 
 # Default security for every endpoint
 security:
@@ -55,7 +48,10 @@ paths:
       description: Checks that the service is running and its dependencies are available.
       tags:
         - Health
-      security: []  # Public endpoint
+      security: []  # Internal probe for barber-saas-infra; not published through the gateway
+      servers:
+        - url: http://[domain]-api:8080
+          description: Internal compose network
       responses:
         '200':
           description: Service healthy
@@ -78,19 +74,17 @@ paths:
                       database:
                         type: string
                         enum: [ok, degraded, down]
-                      redis:
-                        type: string
-                        enum: [ok, degraded, down]
               example:
                 status: ok
-                timestamp: '2024-01-15T10:30:00Z'
+                timestamp: '2026-01-15T10:30:00Z'
                 dependencies:
                   database: ok
-                  redis: ok
         '503':
-          description: Service unavailable (starting up or a dependency is down)
+          $ref: './_shared.yaml#/components/responses/ServiceUnavailable'
 
-  /[resources]:
+  /api/v1/[resources]:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
       summary: List [resources]
       description: Returns a paginated list of [resources].
@@ -111,15 +105,14 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [data, meta]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/[Resource]Response'
-                  meta:
-                    $ref: './_shared.yaml#/components/schemas/PaginatedMeta'
+                allOf:
+                  - $ref: './_shared.yaml#/components/schemas/PaginatedList'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/[Resource]Response'
         '401':
           $ref: './_shared.yaml#/components/responses/Unauthorized'
         '500':
@@ -131,6 +124,8 @@ paths:
       operationId: create[Resource]
       tags:
         - [Resource A]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdempotencyKeyHeader'
       requestBody:
         required: true
         content:
@@ -145,10 +140,15 @@ paths:
           description: "[Resource] created"
           headers:
             Location:
-              description: URL of the created resource
+              $ref: './_shared.yaml#/components/headers/Location'
+            X-Correlation-Id:
+              $ref: './_shared.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
               schema:
-                type: string
-                example: /[resources]/550e8400-e29b-41d4-a716-446655440000
+                $ref: '#/components/schemas/[Resource]Response'
+        '200':
+          description: Retry with the same Idempotency-Key; returns the resource already created
           content:
             application/json:
               schema:
@@ -162,9 +162,10 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
 
-  /[resources]/{id}:
+  /api/v1/[resources]/{id}:
     parameters:
       - $ref: './_shared.yaml#/components/parameters/IdParam'
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
 
     get:
       summary: Get [resource] by id
@@ -217,7 +218,7 @@ paths:
 
     delete:
       summary: Delete [resource]
-      description: Soft delete — the resource is not physically removed.
+      description: Deactivation (`is_active = false`) or a terminal status, per the deletion model in `06-data/data-dictionary.md`.
       operationId: delete[Resource]
       tags:
         - [Resource A]

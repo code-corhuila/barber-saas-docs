@@ -135,14 +135,14 @@ configuration, not a contract (`guidelines.md`).
 
 | Domain | Repo | Contract | Tables (`06-data/models.md`) | FRs | Notes |
 |---|---|---|---|---|---|
-| identity-auth | `barber-saas-identity-auth-api` | [`auth-service.yaml`](contracts/openapi/auth-service.yaml) | `users` | FR-001–FR-004 | Still on the monolith's paths and `409` — OQ-05 |
-| barbershop | `barber-saas-barbershop-api` | [`barbershop-service.yaml`](contracts/openapi/barbershop-service.yaml) | `barbershops`, `services`, `barber_profiles`, `barber_specialties` | FR-005, FR-023, FR-027, FR-028 | OQ-06, OQ-07, OQ-08 |
-| appointment | `barber-saas-appointment-api` | [`appointment-service.yaml`](contracts/openapi/appointment-service.yaml) | `appointments` | FR-008–FR-012 | Still on the monolith's paths and `409` — OQ-05 |
-| schedule | `barber-saas-schedule-api` | [`schedule-service.yaml`](contracts/openapi/schedule-service.yaml) | `barber_schedules`, `schedule_exceptions` | FR-006, FR-007, FR-008 | OQ-09 |
-| loyalty | `barber-saas-loyalty-api` | [`loyalty-service.yaml`](contracts/openapi/loyalty-service.yaml) | `loyalty_rewards_config`, `loyalty_cards`, `loyalty_transactions`, `reward_coupons` | FR-010, FR-013–FR-015 | OQ-02 |
-| notifications | `barber-saas-notifications-api` | [`notification-service.yaml`](contracts/openapi/notification-service.yaml) | `notifications` | FR-020–FR-022 | Placeholder — OQ-03, OQ-05 |
-| finance-inventory | `barber-saas-finance-inventory-api` | [`finance-inventory-service.yaml`](contracts/openapi/finance-inventory-service.yaml) | `finance_records`, `inventory_products`, `inventory_movements` | FR-016–FR-019 | OQ-06 |
-| platform-admin | `barber-saas-platform-admin-api` | [`platform-admin-service.yaml`](contracts/openapi/platform-admin-service.yaml) | `subscription_plans` (+ `barbershops` via barbershop) | FR-004, FR-023–FR-026 | OQ-10, OQ-11 |
+| identity-auth | `barber-saas-identity-auth-api` | [`auth-service.yaml`](contracts/openapi/auth-service.yaml) | `app_user`, `refresh_token`, `password_reset_token` | FR-001–FR-003 | RS256 + JWKS; owner onboarding (FR-004) — OQ-07, OQ-12 |
+| barbershop | `barber-saas-barbershop-api` | [`barbershop-service.yaml`](contracts/openapi/barbershop-service.yaml) | `barbershop`, `service`, `barber_profile`, `barber_specialty` | FR-005, FR-023, FR-027, FR-028 | OQ-07, OQ-08 |
+| appointment | `barber-saas-appointment-api` | [`appointment-service.yaml`](contracts/openapi/appointment-service.yaml) | `appointment` | FR-008–FR-012 | Walk-in, cents, no double booking in the DB — OQ-09 |
+| schedule | `barber-saas-schedule-api` | [`schedule-service.yaml`](contracts/openapi/schedule-service.yaml) | `barber_schedule`, `schedule_exception` | FR-006, FR-007, FR-008 | OQ-09 |
+| loyalty | `barber-saas-loyalty-api` | [`loyalty-service.yaml`](contracts/openapi/loyalty-service.yaml) | `loyalty_rewards_config`, `loyalty_card`, `loyalty_transaction`, `reward_coupon` | FR-010, FR-013–FR-015 | OQ-02 |
+| notifications | `barber-saas-notifications-api` | [`notification-service.yaml`](contracts/openapi/notification-service.yaml) | `notification`, `device_token` (MongoDB) | FR-020–FR-022 | Created from events, not by HTTP |
+| finance-inventory | `barber-saas-finance-inventory-api` | [`finance-inventory-service.yaml`](contracts/openapi/finance-inventory-service.yaml) | `finance_record`, `inventory_product`, `inventory_movement` | FR-016–FR-019 | — |
+| platform-admin | `barber-saas-platform-admin-api` | [`platform-admin-service.yaml`](contracts/openapi/platform-admin-service.yaml) | `subscription_plan` (+ `barbershop` via barbershop) | FR-004, FR-023–FR-026 | OQ-10 |
 
 Lint every contract before a PR:
 
