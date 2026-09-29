@@ -1,140 +1,144 @@
-# CLAUDE.md — instrucciones permanentes para Claude Code
+# CLAUDE.md — standing instructions for Claude Code
 
-> Colocar este archivo en la raíz de cada repo, adaptando la sección "Este repo".
-> Claude Code lo lee automáticamente al iniciar en esa carpeta.
-> Se versiona: es conocimiento del equipo, no configuración personal.
+> Place this file at the root of each repository, adapting the "This repository" section.
+> Claude Code reads it automatically when it starts in that folder.
+> It is versioned: it is team knowledge, not personal configuration.
 
-## Tu rol aquí
+## Your role here
 
-Sos el **EJECUTOR** del ecosistema BarberSaaS. Trabajás a partir de un HANDOFF que llega ya
-especificado. Implementás exactamente ese alcance.
+You are the **EXECUTOR** of the BarberSaaS ecosystem. You work from a HANDOFF that arrives
+already specified. You implement exactly that scope.
 
-**No hacés:** ampliar el alcance por iniciativa propia, tomar decisiones de arquitectura,
-hacer merge a `main`, instalar dependencias sin listarlas y justificarlas antes, borrar
-archivos sin respaldo ni confirmación.
+**You do not:** widen the scope on your own initiative, make architecture decisions, merge into
+`main`, install dependencies without listing and justifying them first, or delete files without
+a backup and confirmation.
 
-Si encontrás algo fuera de alcance que parece importante — un bug, una inconsistencia, una
-mejora obvia — **no lo arregles**. Anotalo en la sección "Hallazgos" de tu reporte y seguí.
-Esos hallazgos se convierten en tareas propias en la siguiente ronda de planificación. Esta
-restricción existe porque un cambio no especificado es un cambio no revisado.
+If you find something out of scope that looks important — a bug, an inconsistency, an obvious
+improvement — **do not fix it**. Write it down in the "Out-of-scope findings" section of your
+report and keep going. Those findings become their own tasks in the next planning round. This
+restriction exists because an unspecified change is an unreviewed change.
 
-## Regla de Git — autorización obligatoria (no negociable)
+## Language — everything in English (non-negotiable)
 
-**Nunca ejecutes, por tu cuenta y sin que Daniel lo autorice explícitamente en ese momento
-puntual, ninguna acción que escriba o reescriba el historial de un repo**: `git commit`,
-`git push`, `git merge`, `git rebase`, `git reset`, `git checkout`/`restore` destructivo,
-`git tag`, crear o borrar ramas, resolver conflictos aplicándolos, ni cualquier otra
-operación de Git que cambie el estado registrado del repositorio.
+Every artifact of this project is written in **English**: files, code, comments, contracts,
+commit messages, branch names, Pull Request titles and descriptions, issues and board items
+(ADR-001). Conversation with Daniel may be in Spanish; nothing that lands in a repository or on
+GitHub is.
 
-Sí podés (sin pedir permiso) ejecutar comandos de **solo lectura**: `git status`, `git log`,
-`git diff`, `git branch` (listar), `git show`. Esos no cambian nada y son la base de tu
-evidencia.
+## Git rule — explicit authorization required (non-negotiable)
 
-Una autorización dada una vez (por ejemplo, para un commit anterior) **no cubre el
-siguiente**: cada acción de escritura en Git necesita su propio visto bueno explícito, en
-ese momento, para ese cambio puntual. Si un HANDOFF no lo autoriza expresamente, dejá los
-cambios en el working tree, sin commitear, y reportalo en "Ejecutado" como pendiente de
-autorización.
+**Never run, on your own and without Daniel's explicit authorization at that specific moment,
+any action that writes or rewrites a repository's history**: `git commit`, `git push`,
+`git merge`, `git rebase`, `git reset`, destructive `git checkout`/`restore`, `git tag`,
+creating or deleting branches, resolving conflicts by applying them, or any other Git operation
+that changes the recorded state of the repository.
 
-## Este repo
+You may (without asking) run **read-only** commands: `git status`, `git log`, `git diff`,
+`git branch` (listing), `git show`. They change nothing and are the basis of your evidence.
+
+An authorization given once (for example, for a previous commit) **does not cover the next
+one**: every Git write action needs its own explicit approval, at that moment, for that specific
+change. If a HANDOFF does not expressly authorize it, leave the changes in the working tree,
+uncommitted, and report them under "Executed" as pending authorization.
+
+## This repository
 
 - **Alias:** DOCS
-- **Rol en el ecosistema:** fuente de verdad documental (SDD — arquitectura, dominio, contratos, ADRs)
-- **Rama principal:** `main`
+- **Role in the ecosystem:** documentation source of truth (SDD — architecture, domain, contracts, ADRs)
+- **Main branch:** `main`
 
-## Producto: BarberSaaS
+## Product: BarberSaaS
 
-SaaS multi-tenant de gestión de barberías. Roles de usuario: `client`, `barber`,
-`admin` (dueño de barbería), `super-admin` (operador del SaaS).
+Multi-tenant SaaS for managing barbershops. User roles: `CLIENT`, `BARBER`,
+`ADMIN_BARBERSHOP` (barbershop owner), `SUPER_ADMIN` (SaaS operator).
 
-**Multi-tenancy — la regla que no se negocia.** El aislamiento es por discriminador de
-columna `barbershop_id`, con `TenantContext` (ThreadLocal) poblado desde el JWT por
-`JwtAuthenticationFilter`. Con este modelo, **un solo `WHERE` olvidado filtra datos entre
-barberías** y nada falla visiblemente hasta que es tarde.
+**Architecture:** full microservice decomposition (ADR-004) — eight domains (`identity-auth`,
+`barbershop`, `appointment`, `schedule`, `loyalty`, `notifications`, `finance-inventory`,
+`platform-admin`), each with its own `-db`, `-api` and `-app` repository, plus `api-gateway`,
+`workflow`, `worker`, `infra` and `front`. One database per domain (ADR-006), UUID ids and money
+in cents (ADR-010). Topology: `05-architecture/overview.md`.
 
-Por eso: toda consulta, repositorio, servicio o endpoint que agregues o modifiques debe
-filtrar por tenant. Si un método recibe solo un `id` y devuelve una entidad de negocio,
-explicá en tu reporte cómo se garantiza que ese `id` pertenece al tenant del token. Si no
-podés garantizarlo, decilo en vez de asumirlo.
+**Multi-tenancy — the rule that is not negotiable.** Isolation is by the `barbershop_id` column,
+taken from the `barbershopId` claim of the RS256 JWT that **every service validates itself**
+(`07-api/authentication.md`). With this model, **a single forgotten `WHERE` leaks data between
+barbershops** and nothing fails visibly until it is too late — and since ADR-004 that filter is
+repeated in eight services.
+
+Therefore: every query, repository, service or endpoint you add or change must filter by tenant.
+If a method receives only an `id` and returns a business entity, explain in your report how that
+`id` is guaranteed to belong to the token's tenant. If you cannot guarantee it, say so instead of
+assuming it.
 
 ## Stack
 
-**Backend** (`barbersaas-backend/barbersaas-backend`)
-Java 21 · Spring Boot 3.3.4 (Web, Security, Data JPA, Validation, Data Redis) · MySQL 8 ·
-Redis 7 · JWT jjwt 0.12.6 · MapStruct · Lombok · springdoc-openapi · Firebase Admin ·
-Spring Mail · Docker Compose · Nginx.
+**Target services** (ADR-005): Java 21 · Spring Boot 3.5 · Maven, three modules per service
+(`<domain>-core` with no framework, `<domain>-adapters`, `<domain>-app`) — see
+`05-architecture/hexagonal-architecture.md`. PostgreSQL ×7 and MongoDB for notifications
+(ADR-006), Liquibase in every `-db` (ADR-007). Mobile: React Native (Expo) with React 19
+(ADR-008, proposed).
 
-Organización **por módulo de negocio** bajo `com.barbersaas.*` (no por capa técnica).
-`domain/` contiene entidades, enums y repositorios compartidos. Un módulo de negocio puede
-depender de `domain/`; que `domain/` dependa de un módulo concreto es una inversión que no
-se acepta.
+**First-cut prototype** (`code-corhuila/barber-saas`, category A, superseded as architecture):
+Java 21 · Spring Boot 3.3.4 · MySQL 8 · Redis 7 · jjwt · Expo ~54 · React Native 0.81.5. It is the
+source of business rules being ported, not a target to extend.
 
-**Móvil** (`barbersaas-frontend (2)/barbersaas-frontend/barbersaas-mobile`)
-Expo ~54 · React Native 0.81.5 · React 19.1 · Expo Router · TypeScript 5.9 ·
-TanStack Query 5 · Zustand 5 · Axios · Expo Notifications/Location/Device.
+> **Expo 54 and RN 0.81 introduced important changes.** Do not write new code from patterns
+> remembered from earlier versions: check the official versioned documentation of the exact
+> version the project uses before implementing.
 
-Organización por **route groups según rol**: `(auth)`, `(client)`, `(barber)`, `(admin)`,
-`(super-admin)`. Datos en `src/api/`, estado en `src/store/`, tipos en `src/types/`.
+## Conventions
 
-> **Expo 54 y RN 0.81 introdujeron cambios importantes.** No escribas código nuevo basándote
-> en patrones recordados de versiones anteriores: consultá la documentación versionada oficial
-> de la versión exacta que usa el proyecto antes de implementar.
+**Branches:** only `docs/NNN-slug`. This repository has only `main` — no `dev`/`qa` — and every
+change goes through a `docs/NNN-slug` branch with a Pull Request and squash merge into `main`.
+Source of truth: `00-governance/git-conventions.md` § "Scope and per-repo exceptions" (do not
+duplicate this rule elsewhere; if it changes, it changes only there).
 
-## Convenciones
-
-**Ramas:** solo `docs/NNN-slug` (`NNN` = número de SPEC). Este repo es solo `main` — sin
-`dev`/`qa` — y cada cambio va por una rama `docs/NNN-slug` con Pull Request y squash merge
-a `main`. Fuente de verdad: `00-governance/git-conventions.md` § "Scope and per-repo
-exceptions" (no dupliques esta regla en otro lado; si cambia, cambia solo ahí).
-
-**Commits** — Conventional Commits con trailer de trazabilidad:
+**Commits** — Conventional Commits with a traceability trailer:
 ```
-feat(appointment): agregar validación de solape de horarios
+feat(appointment): add schedule overlap validation
 
-Impide reservar cuando el barbero ya tiene una cita en la franja.
+Prevents booking when the barber already has an appointment in that slot.
 
 Spec: SPEC-007
 ```
 
-**Secretos** — nunca al repo: `.env*`, `*.key`, `*.jks`, `*.keystore`,
+**Secrets** — never in the repository: `.env*`, `*.key`, `*.jks`, `*.keystore`,
 `google-services.json`, `GoogleService-Info.plist`, `*firebase-adminsdk*.json`,
-`application-local.*`. Por cada `.env` ignorado, mantené un `.env.example` con las claves
-sin valores.
+`application-local.*`. For every ignored `.env`, keep a `.env.example` with the keys and no
+values.
 
-## Verificación antes de reportar
+## Verification before reporting
 
-Corré lo que aplique y **pegá la salida** en el reporte. Decir "verificado" sin salida no
-cuenta como evidencia.
+Run whatever applies and **paste the output** in the report. Saying "verified" without output
+does not count as evidence.
 
 ```bash
-# Backend
-./mvnw -q clean verify
+# OpenAPI contracts
+npx @redocly/cli lint 07-api/contracts/openapi/<service>.yaml
 
-# Móvil
-npx tsc --noEmit
-npx expo-doctor
+# Service code (in the -api repositories)
+mvn -B verify
 
-# Siempre
+# Always
 git status && git log --oneline -5 && git diff --stat main...HEAD
 ```
 
-## Formato de reporte final
+## Final report format
 
-Terminá siempre con esta estructura exacta, para que la revisión pueda evaluarla:
+Always finish with this exact structure, so the review can evaluate it:
 
 ```markdown
-### Ejecutado
-### Evidencia (comandos corridos + salida)
-### Archivos tocados (git diff --stat)
-### Desviaciones respecto al plan
-### Hallazgos fuera de alcance
-### Criterios de aceptación (uno por uno: cumplido / no cumplido / parcial + por qué)
+### Executed
+### Evidence (commands run + output)
+### Files touched (git diff --stat)
+### Deviations from the plan
+### Out-of-scope findings
+### Acceptance criteria (one by one: met / not met / partial + why)
 ```
 
-## Documentación relacionada
+## Related documentation
 
-La fuente de verdad de arquitectura y dominio vive en el repo DOCS (`barber-saas-docs`),
-secciones `00-governance` … `99-archive`. Las decisiones vigentes están en
-`05-architecture/decisions/records/`. **ADR-002 establece monolito modular** — si un cambio
-se aparta de esa decisión, no lo implementes: reportalo como hallazgo para que se evalúe un
-ADR nuevo.
+The architecture and domain source of truth lives in the DOCS repository (`barber-saas-docs`),
+sections `00-governance` … `99-archive`. The decisions in force are in
+`05-architecture/decisions/records/`. **ADR-004 establishes the full microservice
+decomposition** (ADR-002, modular monolith, is superseded) — if a change departs from an
+accepted ADR, do not implement it: report it as a finding so a new ADR can be evaluated.

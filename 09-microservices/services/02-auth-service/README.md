@@ -1,5 +1,11 @@
 # Auth Service
 
+> **Framework example, not BarberSaaS's identity-auth.** This folder is the worked example
+> seeded by the governance framework (Redis, a `roles` array, 1-hour tokens). BarberSaaS's
+> identity service is `barber-saas-identity-auth-api`: contract
+> `07-api/contracts/openapi/auth-service.yaml`, mechanism `07-api/authentication.md`, data
+> `06-data/models.md` §2.
+
 > **Identity authority** of the system. Manages authentication, JWT issuance, and RBAC permissions.
 > It is the authoritative owner of the `User` and `Role` entities.
 

@@ -1,102 +1,106 @@
-# Ejemplo: Diagrama C4 Nivel Contenedor
+# Example: C4 Container-Level Diagram
 
-> Este archivo muestra cómo documentar el sistema con un diagrama C4 Level 2 (Container).
-> El diagrama usa Mermaid, que renderiza nativamente en GitHub, GitLab y la mayoría de
-> editores modernos (VS Code con extensión, Obsidian, etc.).
+> **Framework example.** BarberSaaS's real container diagram is in
+> `05-architecture/overview.md` §3 (8 domain services behind the api-gateway, one database per
+> domain).
+
+> This file shows how to document the system with a C4 Level 2 (Container) diagram.
+> The diagram uses Mermaid, which renders natively on GitHub, GitLab and most modern editors
+> (VS Code with an extension, Obsidian, etc.).
 >
-> **Instrucción:** Copia esta estructura, reemplaza los servicios de ejemplo (api-gateway,
-> auth-service) por los servicios reales de tu proyecto, y muévelo a `diagrams/source/c4-container.md`.
+> **Instruction:** Copy this structure, replace the example services (api-gateway,
+> auth-service) with your project's real services, and move it to `diagrams/source/c4-container.md`.
 
 ---
 
-## Sistema de ejemplo: plataforma de gestión de [X]
+## Example system: [X] management platform
 
 ```mermaid
 C4Container
-    title Diagrama de Contenedores — [Nombre del Sistema]
+    title Container Diagram — [System Name]
 
-    Person(usuario, "Usuario / Cliente", "Accede al sistema desde el navegador o app móvil")
-    Person(admin, "Administrador", "Gestiona configuración y usuarios del sistema")
+    Person(user, "User / Client", "Accesses the system from the browser or mobile app")
+    Person(admin, "Administrator", "Manages the system's configuration and users")
 
-    System_Boundary(sistema, "[Nombre del Sistema]") {
+    System_Boundary(system, "[System Name]") {
 
-        Container(frontend, "Frontend Web", "React / Vue / Angular", "Interfaz de usuario. SPA servida como archivos estáticos.")
+        Container(frontend, "Web Frontend", "React / Vue / Angular", "User interface. SPA served as static files.")
 
-        Container(gateway, "API Gateway", "[Tu framework]", "Punto único de entrada. Autentica tokens JWT, enruta al servicio correcto, aplica rate limiting.")
+        Container(gateway, "API Gateway", "[Your framework]", "Single entry point. Authenticates JWTs, routes to the right service, applies rate limiting.")
 
-        Container(auth, "Auth Service", "[Tu stack]", "Gestiona autenticación (login/registro/refresh). Dueño de la entidad User y Role.")
+        Container(auth, "Auth Service", "[Your stack]", "Handles authentication (login/register/refresh). Owner of the User and Role entities.")
 
-        Container(servicio_a, "[Servicio A]", "[Tu stack]", "[Responsabilidad principal del servicio A. Dueño de [Entidad A].]")
+        Container(service_a, "[Service A]", "[Your stack]", "[Main responsibility of service A. Owner of [Entity A].]")
 
-        Container(servicio_b, "[Servicio B]", "[Tu stack]", "[Responsabilidad principal del servicio B. Dueño de [Entidad B].]")
+        Container(service_b, "[Service B]", "[Your stack]", "[Main responsibility of service B. Owner of [Entity B].]")
 
-        ContainerDb(db_auth, "BD Auth", "PostgreSQL", "Usuarios, roles, refresh tokens.")
-        ContainerDb(db_a, "BD [Servicio A]", "[Motor elegido]", "Datos del dominio de [Servicio A].")
-        ContainerDb(db_b, "BD [Servicio B]", "[Motor elegido]", "Datos del dominio de [Servicio B].")
-        ContainerDb(redis, "Redis", "Redis", "Token blacklist, rate limiting, caché compartida.")
-        ContainerDb(broker, "Message Broker", "Kafka / RabbitMQ", "Eventos de dominio entre servicios.")
+        ContainerDb(db_auth, "Auth DB", "PostgreSQL", "Users, roles, refresh tokens.")
+        ContainerDb(db_a, "[Service A] DB", "[Chosen engine]", "Domain data of [Service A].")
+        ContainerDb(db_b, "[Service B] DB", "[Chosen engine]", "Domain data of [Service B].")
+        ContainerDb(redis, "Redis", "Redis", "Token blacklist, rate limiting, shared cache.")
+        ContainerDb(broker, "Message Broker", "Kafka / RabbitMQ", "Domain events between services.")
     }
 
-    System_Ext(ext_email, "Servicio de Email", "Sendgrid / SES / SMTP")
-    System_Ext(ext_pago, "Pasarela de pago", "[Si aplica al proyecto]")
+    System_Ext(ext_email, "Email Service", "Sendgrid / SES / SMTP")
+    System_Ext(ext_payment, "Payment gateway", "[If it applies to the project]")
 
-    %% Relaciones Usuario → Sistema
-    Rel(usuario, frontend, "Usa", "HTTPS")
-    Rel(admin, frontend, "Administra", "HTTPS")
+    %% User → System relations
+    Rel(user, frontend, "Uses", "HTTPS")
+    Rel(admin, frontend, "Administers", "HTTPS")
     Rel(frontend, gateway, "API calls", "HTTPS / REST")
 
-    %% Gateway → Servicios
-    Rel(gateway, auth, "Verifica tokens / enruta", "HTTP interno")
-    Rel(gateway, servicio_a, "Enruta peticiones", "HTTP interno")
-    Rel(gateway, servicio_b, "Enruta peticiones", "HTTP interno")
+    %% Gateway → Services
+    Rel(gateway, auth, "Verifies tokens / routes", "Internal HTTP")
+    Rel(gateway, service_a, "Routes requests", "Internal HTTP")
+    Rel(gateway, service_b, "Routes requests", "Internal HTTP")
 
-    %% Servicios → BD (cada servicio tiene su propia BD)
-    Rel(auth, db_auth, "Lee / escribe", "SQL")
+    %% Services → DB (each service has its own DB)
+    Rel(auth, db_auth, "Reads / writes", "SQL")
     Rel(auth, redis, "Token blacklist", "Redis protocol")
     Rel(gateway, redis, "Rate limiting", "Redis protocol")
-    Rel(servicio_a, db_a, "Lee / escribe", "SQL / NoSQL")
-    Rel(servicio_b, db_b, "Lee / escribe", "SQL / NoSQL")
+    Rel(service_a, db_a, "Reads / writes", "SQL / NoSQL")
+    Rel(service_b, db_b, "Reads / writes", "SQL / NoSQL")
 
-    %% Comunicación asíncrona
-    Rel(auth, broker, "Publica eventos (user.registered)", "Async")
-    Rel(servicio_a, broker, "Publica / consume eventos", "Async")
-    Rel(servicio_b, broker, "Consume eventos de [Servicio A]", "Async")
+    %% Asynchronous communication
+    Rel(auth, broker, "Publishes events (user.registered)", "Async")
+    Rel(service_a, broker, "Publishes / consumes events", "Async")
+    Rel(service_b, broker, "Consumes [Service A] events", "Async")
 
-    %% Sistemas externos
-    Rel(servicio_b, ext_email, "Envía notificaciones", "HTTPS / SMTP")
-    Rel(servicio_a, ext_pago, "Procesa pagos", "HTTPS")
+    %% External systems
+    Rel(service_b, ext_email, "Sends notifications", "HTTPS / SMTP")
+    Rel(service_a, ext_payment, "Processes payments", "HTTPS")
 ```
 
 ---
 
-## Cómo usar este diagrama
+## How to use this diagram
 
-1. **Renderizar en GitHub:** El diagrama se renderiza automáticamente al hacer push. No se necesita ninguna herramienta adicional.
+1. **Render on GitHub:** The diagram renders automatically on push. No extra tool is needed.
 
-2. **Renderizar en VS Code:** Instalar la extensión "Markdown Preview Mermaid Support" o usar la extensión oficial de Mermaid.
+2. **Render in VS Code:** Install the "Markdown Preview Mermaid Support" extension or use the official Mermaid extension.
 
-3. **Exportar como imagen:** Usar la [CLI de Mermaid](https://github.com/mermaid-js/mermaid-cli):
+3. **Export as an image:** Use the [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli):
 ```bash
 mmdc -i c4-container-example.md -o ../exports/c4-container.svg
 ```
 
-4. **Actualizar el diagrama:** El diagrama vive en Git junto al código. Cuando cambies la arquitectura (nuevo servicio, nuevo motor de BD), actualiza el diagrama en el mismo PR.
+4. **Update the diagram:** The diagram lives in Git next to the code. When the architecture changes (new service, new DB engine), update the diagram in the same PR.
 
 ---
 
-## Convenciones para este proyecto
+## Conventions for this project
 
-| Elemento | Color / Estilo | Cuándo usarlo |
-|----------|---------------|---------------|
-| `Container` | Azul | Microservicio o aplicación deployable |
-| `ContainerDb` | Cilindro azul | Base de datos, caché, broker |
-| `Person` | Icono persona | Actor humano |
-| `System_Ext` | Gris | Sistema de terceros que no controlas |
+| Element | Color / Style | When to use it |
+|---------|---------------|----------------|
+| `Container` | Blue | Microservice or deployable application |
+| `ContainerDb` | Blue cylinder | Database, cache, broker |
+| `Person` | Person icon | Human actor |
+| `System_Ext` | Gray | Third-party system you do not control |
 
 ---
 
-## Correlaciones
+## Correlations
 
-- Catálogo de servicios → `09-microservices/service-catalog.md`
-- Detalles de cada servicio → `09-microservices/services/`
-- Índice de todos los diagramas → `08-uml/diagram-index.md`
+- Service catalog → `09-microservices/service-catalog.md`
+- Details of each service → `09-microservices/services/`
+- Index of every diagram → `08-uml/diagram-index.md`
