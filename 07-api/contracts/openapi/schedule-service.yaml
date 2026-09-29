@@ -1,73 +1,75 @@
 openapi: 3.1.0
 info:
   title: barber-saas-schedule-api
-  version: 1.0.0
+  version: 1.1.0
   license:
     name: MIT
     identifier: MIT
   description: |
-    Servicio del dominio **schedule** (`barber-saas-schedule-api`, ADR-004): horario semanal
-    de cada barbero, excepciones por fecha (día libre u horario especial) y cálculo de
-    disponibilidad para reservar. `appointment-service.yaml` depende de este contrato y de
-    `barbershop-service.yaml` (barbero y servicio).
+    Service of the **schedule** domain (`barber-saas-schedule-api`, ADR-004): each barber's
+    weekly schedule, exceptions per date (day off or special hours) and the availability
+    computation used for booking. `appointment-service.yaml` depends on this contract and on
+    `barbershop-service.yaml` (barber and service).
 
-    **Origen ascendente:** FR-006 (horario semanal sin solapes) y FR-007 (la excepción
-    reemplaza, nunca se mezcla), HU-SHOP-001 escenarios 2 y 3; FR-008 (reserva sin doble
-    booking, que consume la disponibilidad). Tablas de `06-data/models.md` § "Schedule":
-    `barber_schedules`, `schedule_exceptions`. Invariantes `AGGR-INV-BARBER-001` y
-    `AGGR-INV-BARBER-002` y el value object `TimeSlot` de `02-domain/entities-and-rules.md`.
-    Rutas y campos alineados con `ScheduleController` del monolito
-    (`code-corhuila/barber-saas@develop`).
+    1.1.0 — translated to English (ADR-001); table names aligned with `06-data/models.md` §4.
 
-    ## Autenticación
-    JWT Bearer (`_shared.yaml#/components/securitySchemes/bearerAuth`). `barbershopId` se
-    deriva del token (`TenantContext`); ninguna operación lo recibe. Un `barberId` de otra
-    barbería responde `404`, igual que uno inexistente (mismo criterio que `DEC-APPT-01`).
+    **Upstream origin:** FR-006 (weekly schedule without overlaps) and FR-007 (an exception
+    replaces the day, it is never merged), HU-SHOP-001 scenarios 2 and 3; FR-008 (booking
+    without double booking, which consumes availability). Tables of `06-data/models.md` §4
+    (schema `schedule`): `barber_schedule`, `schedule_exception`. Invariants
+    `AGGR-INV-BARBER-001` and `AGGR-INV-BARBER-002` and the value object `TimeSlot` of
+    `02-domain/entities-and-rules.md`. Paths and fields aligned with the prototype's
+    `ScheduleController` (`code-corhuila/barber-saas@develop`).
+
+    ## Authentication
+    JWT Bearer, RS256 (`_shared.yaml#/components/securitySchemes/bearerAuth`). `barbershopId`
+    comes from the token's claim; no operation receives it. A `barberId` of another barbershop
+    answers `404`, the same as a non-existent one (same criterion as `DEC-APPT-01`).
 
     ## Roles
-    | Rol | Qué puede hacer aquí |
+    | Role | What it can do here |
     |---|---|
-    | `SUPER_ADMIN` | Nada: no opera horarios de una barbería |
-    | `ADMIN_BARBERSHOP` | Definir el horario semanal y las excepciones de cualquier barbero de su barbería |
-    | `BARBER` | Leer **su propio** horario y excepciones |
-    | `CLIENT` | Consultar disponibilidad para reservar |
+    | `SUPER_ADMIN` | Nothing: does not operate a barbershop's schedules |
+    | `ADMIN_BARBERSHOP` | Define the weekly schedule and the exceptions of any barber of their barbershop |
+    | `BARBER` | Read **their own** schedule and exceptions |
+    | `CLIENT` | Query availability to book |
 
-    ## Horas y zona horaria
-    `startTime`/`endTime` son `HH:mm` en la zona horaria de la barbería
-    (`barbershops.timezone`, por defecto `America/Bogota`), igual que en
-    `appointment-service.yaml`. Las columnas son `TIME` sin zona (`data-dictionary.md`,
-    "Time and timezone"). `dayOfWeek` va de `0` (domingo) a `6` (sábado), como en la tabla.
+    ## Times and time zone
+    `startTime`/`endTime` are `HH:mm` in the barbershop's time zone (`barbershop.timezone`,
+    default `America/Bogota`), as in `appointment-service.yaml`. The columns are `time` without
+    zone (`data-dictionary.md`, "Time and timezone"). `dayOfWeek` goes from `0` (Sunday) to `6`
+    (Saturday), as in the table.
 
-    ## Decisiones de diseño de este contrato
+    ## Design decisions of this contract
 
-    ### DEC-SCHED-01 · El horario semanal se reemplaza completo
-    `PUT /api/v1/barber-schedules/{barberId}` sustituye todos los bloques del barbero en una
-    transacción (como `setSchedule` del monolito). Así el chequeo de solapes
-    (`AGGR-INV-BARBER-001`) se hace sobre el conjunto final, sin estados intermedios. El
-    horario es un recurso único y acotado (máximo 28 bloques), no una colección paginada.
+    ### DEC-SCHED-01 · The weekly schedule is replaced as a whole
+    `PUT /api/v1/barber-schedules/{barberId}` replaces all of the barber's blocks in one
+    transaction (like the prototype's `setSchedule`). The overlap check
+    (`AGGR-INV-BARBER-001`) runs on the final set, with no intermediate states. The schedule is
+    a single bounded resource (at most 28 blocks), not a paginated collection.
 
-    ### DEC-SCHED-02 · Una excepción reemplaza el día, no se mezcla
-    Si existe una excepción para la fecha, la disponibilidad de ese día sale **solo** de la
-    excepción: `isDayOff = true` significa sin disponibilidad; `false` usa únicamente su
-    `startTime`–`endTime` (`AGGR-INV-BARBER-002`, FR-007). Hay a lo sumo una excepción por
-    barbero y fecha (índice único de 06): una segunda responde `422`.
+    ### DEC-SCHED-02 · An exception replaces the day, it is not merged
+    If an exception exists for the date, that day's availability comes **only** from the
+    exception: `isDayOff = true` means no availability; `false` uses only its
+    `startTime`–`endTime` (`AGGR-INV-BARBER-002`, FR-007). There is at most one exception per
+    barber and date (`uq_schedule_exception_barber_date` in 06): a second one answers `422`.
 
-    ### DEC-SCHED-03 · La disponibilidad consulta a otros dominios por API
-    Para calcular los huecos libres, el servicio necesita la duración del servicio
-    (barbershop) y las citas ya reservadas (appointment). Por la regla de oro 8 los pide a
-    esos `-api`, no a sus bases. Como appointment a su vez valida contra este horario, la
-    dependencia es circular; queda registrada en `open-questions.md` OQ-09.
+    ### DEC-SCHED-03 · Availability asks other domains through their APIs
+    To compute free slots the service needs the service's duration (barbershop) and the
+    appointments already booked (appointment). By norm 7.3 it asks those `-api`, not their
+    databases. Since appointment in turn validates against this schedule, the dependency is
+    circular; it is recorded in `open-questions.md` OQ-09.
 
 servers:
   - url: http://localhost:8000
-    description: api-gateway local (única entrada, norma 5.6.1) — las rutas incluyen `/api/v1`
+    description: Local api-gateway (single entry, norm 5.6.1) — paths include `/api/v1`
   - url: https://api.dev.{domain}
-    description: api-gateway del entorno de desarrollo
+    description: Development api-gateway
     variables:
       domain:
         default: example.com
   - url: https://api.{domain}
-    description: api-gateway de producción
+    description: Production api-gateway
     variables:
       domain:
         default: example.com
@@ -77,28 +79,28 @@ security:
 
 tags:
   - name: Weekly schedule
-    description: Horario semanal recurrente de un barbero (`barber_schedules`)
+    description: A barber's recurring weekly schedule (`barber_schedule`)
   - name: Schedule exceptions
-    description: Días libres u horarios especiales por fecha (`schedule_exceptions`)
+    description: Days off or special hours per date (`schedule_exception`)
   - name: Availability
-    description: Huecos libres para reservar
+    description: Free slots to book
   - name: Health
-    description: Health check del servicio
+    description: Service health check
 
 paths:
   /health:
     get:
       summary: Health check
-      description: Sonda interna para `barber-saas-infra`; no se publica en el api-gateway.
+      description: Internal probe for `barber-saas-infra`; not published through the api-gateway.
       operationId: healthCheck
       tags: [Health]
       security: []
       servers:
         - url: http://schedule-api:8080
-          description: Red interna de compose
+          description: Internal compose network
       responses:
         '200':
-          description: Servicio saludable
+          description: Service healthy
           content:
             application/json:
               schema:
@@ -112,13 +114,13 @@ paths:
       - $ref: '#/components/parameters/BarberIdPath'
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Ver el horario semanal de un barbero
-      description: 'Roles: `ADMIN_BARBERSHOP` (cualquier barbero de su barbería) y `BARBER` (solo el suyo).'
+      summary: Get a barber's weekly schedule
+      description: 'Roles: `ADMIN_BARBERSHOP` (any barber of their barbershop) and `BARBER` (only their own).'
       operationId: getWeeklySchedule
       tags: [Weekly schedule]
       responses:
         '200':
-          description: Horario semanal (puede venir sin bloques si aún no se configuró)
+          description: Weekly schedule (may have no blocks if not configured yet)
           content:
             application/json:
               schema:
@@ -126,7 +128,7 @@ paths:
         '401':
           $ref: './_shared.yaml#/components/responses/Unauthorized'
         '403':
-          description: Un `BARBER` consulta el horario de otro barbero, o el rol es `CLIENT`/`SUPER_ADMIN`.
+          description: A `BARBER` reads another barber's schedule, or the role is `CLIENT`/`SUPER_ADMIN`.
           content:
             application/json:
               schema:
@@ -136,11 +138,11 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
     put:
-      summary: Configurar el horario semanal de un barbero
+      summary: Set a barber's weekly schedule
       description: |
-        Rol: `ADMIN_BARBERSHOP` (FR-006). Reemplaza todos los bloques (`DEC-SCHED-01`). Se
-        permiten varios bloques el mismo día (turno partido) siempre que no se solapen. Un
-        conjunto vacío deja al barbero sin horario recurrente.
+        Role: `ADMIN_BARBERSHOP` (FR-006). Replaces all blocks (`DEC-SCHED-01`). Several blocks
+        on the same day are allowed (split shift) as long as they do not overlap. An empty set
+        leaves the barber without a recurring schedule.
       operationId: setWeeklySchedule
       tags: [Weekly schedule]
       requestBody:
@@ -162,26 +164,26 @@ paths:
                   endTime: '15:00'
       responses:
         '200':
-          description: Horario guardado
+          description: Schedule saved
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WeeklySchedule'
         '400':
           description: |
-            Formato inválido: `dayOfWeek` fuera de 0–6, hora que no es `HH:mm`, o
-            `endTime <= startTime` (el `CHECK (end_time > start_time)` de 06 y el value object
-            `TimeSlot`).
+            Invalid format: `dayOfWeek` outside 0–6, a time that is not `HH:mm`, or
+            `endTime <= startTime` (`chk_barber_schedule_time` in 06 and the `TimeSlot` value
+            object).
           content:
             application/json:
               schema:
                 $ref: './_shared.yaml#/components/schemas/ErrorResponse'
               example:
                 error: VALIDATION_ERROR
-                message: Datos de entrada inválidos
+                message: Invalid input data
                 details:
                   - field: slots[0].endTime
-                    message: debe ser posterior a startTime
+                    message: must be after startTime
                 traceId: 550e8400-e29b-41d4-a716-446655440000
         '401':
           $ref: './_shared.yaml#/components/responses/Unauthorized'
@@ -191,15 +193,15 @@ paths:
           $ref: './_shared.yaml#/components/responses/NotFound'
         '422':
           description: |
-            Dos bloques del mismo día se solapan (`AGGR-INV-BARBER-001`, FR-006,
-            HU-SHOP-001 escenario 2). No se guarda ninguno.
+            Two blocks of the same day overlap (`AGGR-INV-BARBER-001`, FR-006, HU-SHOP-001
+            scenario 2). None is saved.
           content:
             application/json:
               schema:
                 $ref: './_shared.yaml#/components/schemas/ErrorResponse'
               example:
                 error: BUSINESS_RULE_VIOLATION
-                message: Los bloques del lunes 08:00–12:00 y 11:00–15:00 se solapan.
+                message: The Monday blocks 08:00–12:00 and 11:00–15:00 overlap
                 traceId: 550e8400-e29b-41d4-a716-446655440000
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
@@ -209,10 +211,10 @@ paths:
     parameters:
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Listar excepciones de horario
+      summary: List schedule exceptions
       description: |
-        Roles: `ADMIN_BARBERSHOP` (todas las de su barbería, filtrables por barbero) y
-        `BARBER` (el servidor fuerza su propio `barberId`). Orden: fecha más reciente primero.
+        Roles: `ADMIN_BARBERSHOP` (all of their barbershop, filterable by barber) and `BARBER`
+        (the server forces their own `barberId`). Order: most recent date first.
       operationId: listScheduleExceptions
       tags: [Schedule exceptions]
       parameters:
@@ -220,24 +222,24 @@ paths:
         - $ref: './_shared.yaml#/components/parameters/LimitParam'
         - name: barberId
           in: query
-          description: Filtrar por perfil de barbero
+          description: Filter by barber profile
           schema:
             $ref: './_shared.yaml#/components/schemas/UUID'
         - name: from
           in: query
-          description: Fecha inicial inclusive (`YYYY-MM-DD`)
+          description: Start date, inclusive (`YYYY-MM-DD`)
           schema:
             type: string
             format: date
         - name: to
           in: query
-          description: Fecha final inclusive (`YYYY-MM-DD`); no puede ser anterior a `from`
+          description: End date, inclusive (`YYYY-MM-DD`); cannot be before `from`
           schema:
             type: string
             format: date
       responses:
         '200':
-          description: Página de excepciones
+          description: Page of exceptions
           content:
             application/json:
               schema:
@@ -251,11 +253,11 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
     post:
-      summary: Registrar una excepción de horario
+      summary: Register a schedule exception
       description: |
-        Rol: `ADMIN_BARBERSHOP` (FR-007, HU-SHOP-001 escenario 3). Día libre
-        (`isDayOff = true`) u horario especial (`isDayOff = false` con `startTime`/`endTime`
-        obligatorios). Reemplaza el horario semanal de esa fecha (`DEC-SCHED-02`).
+        Role: `ADMIN_BARBERSHOP` (FR-007, HU-SHOP-001 scenario 3). Day off (`isDayOff = true`)
+        or special hours (`isDayOff = false` with required `startTime`/`endTime`). Replaces the
+        weekly schedule on that date (`DEC-SCHED-02`).
       operationId: createScheduleException
       tags: [Schedule exceptions]
       parameters:
@@ -268,24 +270,24 @@ paths:
               $ref: '#/components/schemas/CreateScheduleExceptionRequest'
             examples:
               dayOff:
-                summary: Día libre
+                summary: Day off
                 value:
                   barberId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
                   exceptionDate: '2026-10-12'
                   isDayOff: true
-                  reason: Festivo
+                  reason: Public holiday
               specialHours:
-                summary: Horario especial
+                summary: Special hours
                 value:
                   barberId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
                   exceptionDate: '2026-10-15'
                   isDayOff: false
                   startTime: '13:00'
                   endTime: '18:00'
-                  reason: Cita médica en la mañana
+                  reason: Medical appointment in the morning
       responses:
         '201':
-          description: Excepción creada
+          description: Exception created
           headers:
             Location:
               $ref: './_shared.yaml#/components/headers/Location'
@@ -296,14 +298,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/ScheduleException'
         '200':
-          description: Reintento con el mismo `Idempotency-Key`; devuelve la excepción ya creada.
+          description: Retry with the same `Idempotency-Key`; returns the exception already created.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScheduleException'
         '400':
           description: |
-            Formato inválido, `isDayOff = false` sin `startTime`/`endTime`, o
+            Invalid format, `isDayOff = false` without `startTime`/`endTime`, or
             `endTime <= startTime`.
           content:
             application/json:
@@ -314,23 +316,23 @@ paths:
         '403':
           $ref: './_shared.yaml#/components/responses/Forbidden'
         '404':
-          description: El `barberId` no existe o es de otra barbería.
+          description: The `barberId` does not exist or belongs to another barbershop.
           content:
             application/json:
               schema:
                 $ref: './_shared.yaml#/components/schemas/ErrorResponse'
         '422':
           description: |
-            Ya existe una excepción para ese barbero y esa fecha (índice único
-            `(barber_profile_id, exception_date)` de 06, `DEC-SCHED-02`). Para cambiarla, se
-            borra y se crea de nuevo.
+            An exception already exists for that barber and date
+            (`uq_schedule_exception_barber_date` in 06, `DEC-SCHED-02`). To change it, delete it
+            and create it again.
           content:
             application/json:
               schema:
                 $ref: './_shared.yaml#/components/schemas/ErrorResponse'
               example:
                 error: BUSINESS_RULE_VIOLATION
-                message: El barbero ya tiene una excepción registrada para 2026-10-12.
+                message: The barber already has an exception for 2026-10-12
                 traceId: 550e8400-e29b-41d4-a716-446655440000
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
@@ -340,13 +342,13 @@ paths:
       - $ref: './_shared.yaml#/components/parameters/IdParam'
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Obtener una excepción
-      description: 'Roles: `ADMIN_BARBERSHOP` y `BARBER` (solo las suyas).'
+      summary: Get an exception
+      description: 'Roles: `ADMIN_BARBERSHOP` and `BARBER` (only their own).'
       operationId: getScheduleExceptionById
       tags: [Schedule exceptions]
       responses:
         '200':
-          description: Excepción encontrada
+          description: Exception found
           content:
             application/json:
               schema:
@@ -358,15 +360,15 @@ paths:
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
     delete:
-      summary: Eliminar una excepción
+      summary: Delete an exception
       description: |
-        Rol: `ADMIN_BARBERSHOP`. La fecha vuelve a regirse por el horario semanal. Borrado
-        físico: la tabla no tiene `is_active`. No cancela citas ya reservadas.
+        Role: `ADMIN_BARBERSHOP`. The date goes back to the weekly schedule. Physical delete: the
+        table has no `is_active`. It does not cancel appointments already booked.
       operationId: deleteScheduleException
       tags: [Schedule exceptions]
       responses:
         '204':
-          description: Excepción eliminada
+          description: Exception deleted
         '401':
           $ref: './_shared.yaml#/components/responses/Unauthorized'
         '403':
@@ -381,40 +383,40 @@ paths:
     parameters:
       - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     get:
-      summary: Consultar huecos disponibles de un barbero
+      summary: Query a barber's free slots
       description: |
-        Roles: `CLIENT`, `ADMIN_BARBERSHOP`, `BARBER`. Devuelve los huecos de la fecha en los
-        que cabe completo el servicio (`durationMinutes`): el horario del día (o la excepción,
-        `DEC-SCHED-02`) menos las citas `PENDING`, `CONFIRMED` o `IN_PROGRESS` del barbero
-        (`DEC-SCHED-03`). Es informativo: la garantía de no doble booking la da
-        `POST /appointments` con su bloqueo (`INV-APPT-001`). Una fecha pasada devuelve
-        `slots` vacío. En el monolito este endpoint era anónimo; aquí exige token porque
-        el tenant sale de él (OQ-07).
+        Roles: `CLIENT`, `ADMIN_BARBERSHOP`, `BARBER`. Returns the slots of the date where the
+        whole service (`durationMinutes`) fits: the day's schedule (or the exception,
+        `DEC-SCHED-02`) minus the barber's `PENDING`, `CONFIRMED` or `IN_PROGRESS` appointments
+        (`DEC-SCHED-03`). It is informative: the no-double-booking guarantee is given by
+        `POST /api/v1/appointments` and the `ex_appointment_no_double_booking` constraint
+        (`INV-APPT-001`). A past date returns empty `slots`. In the prototype this endpoint was
+        anonymous; here it requires a token because the tenant comes from it (OQ-07).
       operationId: getAvailability
       tags: [Availability]
       parameters:
         - name: barberId
           in: query
           required: true
-          description: Perfil de barbero
+          description: Barber profile
           schema:
             $ref: './_shared.yaml#/components/schemas/UUID'
         - name: serviceId
           in: query
           required: true
-          description: Servicio que se quiere reservar (define la duración del hueco)
+          description: Service to book (defines the slot's duration)
           schema:
             $ref: './_shared.yaml#/components/schemas/UUID'
         - name: date
           in: query
           required: true
-          description: Fecha a consultar (`YYYY-MM-DD`), en la zona horaria de la barbería
+          description: Date to query (`YYYY-MM-DD`), in the barbershop's time zone
           schema:
             type: string
             format: date
       responses:
         '200':
-          description: Huecos disponibles del día
+          description: Free slots of the day
           content:
             application/json:
               schema:
@@ -433,7 +435,7 @@ paths:
         '401':
           $ref: './_shared.yaml#/components/responses/Unauthorized'
         '404':
-          description: El barbero o el servicio no existen, o son de otra barbería.
+          description: The barber or the service does not exist, or belongs to another barbershop.
           content:
             application/json:
               schema:
@@ -447,7 +449,7 @@ components:
       name: barberId
       in: path
       required: true
-      description: Id del perfil de barbero (`barber_profiles.id` en barbershop)
+      description: Barber profile id (`barber_profile.id` in barbershop)
       schema:
         $ref: './_shared.yaml#/components/schemas/UUID'
 
@@ -465,19 +467,19 @@ components:
     LocalTime:
       type: string
       pattern: '^([01]\d|2[0-3]):[0-5]\d$'
-      description: Hora local de la barbería, `HH:mm`.
+      description: Barbershop local time, `HH:mm`.
       example: '08:00'
 
     DayOfWeek:
       type: integer
       minimum: 0
       maximum: 6
-      description: 0 = domingo … 6 = sábado (`barber_schedules.day_of_week`).
+      description: 0 = Sunday … 6 = Saturday (`barber_schedule.day_of_week`).
 
     # ─── Weekly schedule ────────────────────────────────────────────────
     BarberSchedule:
       type: object
-      description: Un bloque de la tabla `barber_schedules`.
+      description: One block of the table `barber_schedule`.
       required: [id, barberProfileId, dayOfWeek, startTime, endTime, isActive]
       properties:
         id:
@@ -492,11 +494,11 @@ components:
           $ref: '#/components/schemas/LocalTime'
         isActive:
           type: boolean
-          description: Bloque vigente. Los bloques reemplazados por un `PUT` no se devuelven.
+          description: Current block. Blocks replaced by a `PUT` are not returned.
 
     WeeklySchedule:
       type: object
-      description: Horario semanal completo de un barbero (`DEC-SCHED-01`).
+      description: A barber's full weekly schedule (`DEC-SCHED-01`).
       required: [barberProfileId, slots]
       properties:
         barberProfileId:
@@ -504,7 +506,7 @@ components:
         slots:
           type: array
           maxItems: 28
-          description: Ordenados por `dayOfWeek` y `startTime`.
+          description: Sorted by `dayOfWeek` and `startTime`.
           items:
             $ref: '#/components/schemas/BarberSchedule'
 
@@ -534,7 +536,7 @@ components:
     # ─── Schedule exception ─────────────────────────────────────────────
     ScheduleException:
       type: object
-      description: Tabla `schedule_exceptions`.
+      description: Table `schedule_exception`.
       required: [id, barberProfileId, exceptionDate, isDayOff]
       properties:
         id:
@@ -547,12 +549,12 @@ components:
         isDayOff:
           type: boolean
         startTime:
-          description: Solo cuando `isDayOff = false`.
+          description: Only when `isDayOff = false`.
           oneOf:
             - $ref: '#/components/schemas/LocalTime'
             - type: 'null'
         endTime:
-          description: Solo cuando `isDayOff = false`.
+          description: Only when `isDayOff = false`.
           oneOf:
             - $ref: '#/components/schemas/LocalTime'
             - type: 'null'
@@ -601,7 +603,7 @@ components:
     # ─── Availability ───────────────────────────────────────────────────
     Availability:
       type: object
-      description: Huecos libres de un día; derivado, sin tabla propia.
+      description: Free slots of a day; derived, no table of its own.
       required: [barberId, serviceId, date, slots]
       properties:
         barberId:
@@ -614,7 +616,7 @@ components:
         slots:
           type: array
           maxItems: 288
-          description: Acotado por los minutos de un día; ordenados por `startTime`.
+          description: Bounded by the minutes of a day; sorted by `startTime`.
           items:
             type: object
             required: [startTime, endTime]
