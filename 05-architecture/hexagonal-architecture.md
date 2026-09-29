@@ -1,381 +1,220 @@
 # Hexagonal Architecture (Ports & Adapters)
 
-> Hexagonal architecture, proposed by Alistair Cockburn, organizes a service so that the
-> **business domain is completely independent** of the surrounding technology.
-> The database, the web framework, the message broker — all are interchangeable details.
-> What matters is the business logic, which lives at the center.
-
-> **Stack note:** The concepts in this document are valid for any language.
-> The code examples and folder structure specific to your technology are in:
-> - Node.js + TypeScript → [`_stacks/node-typescript.md`](../_stacks/node-typescript.md)
-> - Java + Spring Boot → [`_stacks/java-spring.md`](../_stacks/java-spring.md)
-> - Python + FastAPI → [`_stacks/python-fastapi.md`](../_stacks/python-fastapi.md)
-> - Go → [`_stacks/go.md`](../_stacks/go.md)
-
-> **Reality check — BarberSaaS does NOT follow this structure today.** `_stacks/java-spring.md`
-> and this document both describe a full ports/adapters split (`domain/port/in`,
-> `domain/port/out`, a separate `application/` use-case layer, `infrastructure/adapters/`).
-> The real backend (`barbersaas-backend/src/main/java/com/barbersaas/`) uses a flatter
-> structure per bounded-context module: `Controller` → `Service` (calls JPA repositories
-> directly) → `dto/`, with entities and repositories centralized under a shared
-> `com.barbersaas.domain/` package (`entity/`, `enums/`, `repository/`) rather than one
-> `domain/` folder per module. There are no `port/in`/`port/out` interfaces and no separate
-> `application/` layer — verified by inspecting `com.barbersaas.appointment` (no `domain/`,
-> `application/`, or `infrastructure/` subpackages exist there).
+> Hexagonal architecture (Alistair Cockburn) keeps the **business domain independent** of the
+> technology around it: the database, the web framework and the message transport are
+> interchangeable details; the business rules live at the center.
 >
-> This matters because **ADR-002 and `00-governance/documentation-rules.md`'s code-review
-> checklist reference "the hexagonal/bounded-context checklist"** as if it applies literally.
-> Treat the bounded-context package boundary (one Java package per module, ADR-002) as the
-> real, enforced rule; treat everything else on this page (ports, the `application/` layer,
-> the dependency-inversion example) as **educational reference material**, not a description
-> of this codebase, until/unless the team decides to actually refactor toward it.
+> **In BarberSaaS this is a rule, not reference material.** Every service of the ADR-004
+> topology — the eight `barber-saas-<domain>-api`, `-worker` and `-workflow` — is built this way
+> (course norm 5.3.1–5.3.3, annex C), in Java 21 / Spring Boot 3.5 with three Maven modules
+> ([ADR-005](decisions/records/ADR-005-language-per-service.md)). The framework's generic
+> [`_stacks/java-spring.md`](../_stacks/java-spring.md) shows a single-module layout; where it
+> differs, the three-module layout of this document and annex C wins.
+
+> **Prototype vs. target.** The first-cut prototype (`code-corhuila/barber-saas`, ADR-002 —
+> superseded) did **not** follow this structure: per module it went `Controller` → `Service`
+> (calling JPA repositories directly), with entities shared under `com.barbersaas.domain`. Its
+> business rules are ported; its layering is not. Nothing in this document describes the
+> prototype.
 
 ---
 
 ## The problem it solves
 
 ```
-❌ Traditional layered architecture:
+❌ Prototype layering                         ✓ Hexagonal (target)
 
-  [HTTP Controller]
-       ↓
-  [Service]
-       ↓
-  [Repository]
-       ↓
-  [Database]
-
-Problem: The "Service" mixes business logic with framework calls.
-If you change the framework, you break the business. If you want to test the business,
-you need to simulate the database.
-```
-
-```
-✓ Hexagonal Architecture:
-
-  [HTTP Controller]  [CLI]  [Test]  ← Primary Adapters (enter the hexagon)
-          │            │      │
-          └────────────┴──────┘
-                       │
-                 [Driving Port]  ← Interface that defines the domain's API
-                       │
-               ┌───────────────┐
-               │               │
-               │    DOMAIN     │  ← Pure business logic, no external dependencies
-               │               │
-               └───────────────┘
-                       │
-                 [Driven Port]  ← Interface the domain needs from the outside world
-                       │
-          ┌────────────┴──────┐
-          │                   │
-  [DB Adapter]  [Kafka Adapter]  ← Secondary Adapters (exit the hexagon)
+  AppointmentController                        HTTP adapter ──▶ [port in] BookAppointment
+        ↓                                                             │
+  AppointmentService  ← business rules          use case ─────────────┤  (orchestrates)
+        ↓               mixed with JPA,                               ▼
+  AppointmentRepository (JPA)                   DOMAIN  Appointment, invariants INV-APPT-*
+        ↓                                                             ▲
+  MySQL                                         [port out] AppointmentRepository, Clock,
+                                                           BarbershopCatalog, IdGenerator
+To test "no double booking" you need                          ▲
+Spring and a database.                          JDBC adapter · HTTP client adapter · outbox
 ```
 
 ---
 
-## Folder structure
+## The layers (norm 5.3.2)
 
-```
-src/
-├── domain/                          # The hexagon — no frameworks, no external dependencies
-│   ├── [aggregate]/
-│   │   ├── [Aggregate].ts           # Aggregate Root with invariants
-│   │   ├── [Aggregate]Id.ts         # Value Object for the ID
-│   │   ├── events/
-│   │   │   └── [EventOccurred].ts   # Domain events
-│   │   ├── services/
-│   │   │   └── [DomainService].ts   # Logic that does not belong to any entity
-│   │   └── ports/                   # Interfaces (ports) — abstract contracts
-│   │       ├── in/
-│   │       │   └── [UseCasePort].ts # Driving port: use case contract
-│   │       └── out/
-│   │           └── [RepoPort].ts    # Driven port: repository contract
-│   └── shared/
-│       └── value-objects/           # VOs shared between aggregates
-│           ├── Email.ts
-│           └── Money.ts
-│
-├── application/                     # Use cases — orchestrate the domain
-│   └── [aggregate]/
-│       ├── [CreateXxxUseCase].ts    # Implements the driving port
-│       └── dtos/
-│           ├── [CreateXxxRequest].ts
-│           └── [CreateXxxResponse].ts
-│
-├── infrastructure/                  # Everything external to the hexagon
-│   ├── adapters/
-│   │   ├── in/                      # Primary adapters — receive external calls
-│   │   │   ├── http/
-│   │   │   │   ├── [XxxController].ts
-│   │   │   │   └── [XxxRouter].ts
-│   │   │   └── messaging/
-│   │   │       └── [XxxEventConsumer].ts
-│   │   └── out/                     # Secondary adapters — call the outside
-│   │       ├── persistence/
-│   │       │   └── [XxxRepositoryImpl].ts   # Implements the driven port
-│   │       ├── messaging/
-│   │       │   └── [XxxEventPublisher].ts
-│   │       └── external/
-│   │           └── [ExternalApiAdapter].ts
-│   └── config/
-│       ├── database.ts
-│       └── container.ts             # Dependency injection (IoC)
-│
-└── main.ts                          # Bootstrap — connects adapters with ports
-```
+| Layer | What it holds | May depend on | Maven module |
+|---|---|---|---|
+| **Domain** | Entities, value objects, invariants, typed domain errors | Nothing of the project | `<domain>-core` |
+| **Ports in** | What the service offers: use-case interfaces, commands, queries | Domain | `<domain>-core` |
+| **Ports out** | What the service needs: repository, clock, id generator, other domains | Domain | `<domain>-core` |
+| **Use cases** | One implementation per business operation | Ports and domain | `<domain>-core` |
+| **HTTP adapter in** | RS256 token check, validation, error envelope, correlation, routes | Ports in | `<domain>-adapters` |
+| **Adapters out** | JDBC persistence (with pool), outbox, HTTP clients to other domains | Ports out | `<domain>-adapters` |
+| **Composition root** | The only place that knows every concrete type and every explicit limit | Everything | `<domain>-app` |
+
+**Dependency rule:** arrows always point to the domain. `<domain>-core` does **not** declare
+Spring, JPA or any driver in its `pom.xml`, so a `@Service`, `@Entity` or `@RestController` in
+the domain **does not compile** (norm 5.3.3). The rule is enforced by the compiler, not by review.
 
 ---
 
-## The Ports
+## Folder structure — `barber-saas-appointment-api`
 
-Ports are **interfaces** (abstract contracts). The domain defines them;
-adapters implement them.
+Package root `co.edu.corhuila.barbersaas.appointment` (annex C, Java):
 
-### Driving Port (Input Port)
+```
+barber-saas-appointment-api/
+├── appointment-core/                      # no Spring, no JPA, no driver
+│   └── src/main/java/…/appointment/
+│       ├── domain/model/
+│       │   ├── Appointment.java           # aggregate: state machine, INV-APPT-001…005
+│       │   ├── AppointmentStatus.java
+│       │   ├── Money.java                 # value object, long cents (ADR-010)
+│       │   └── DomainException.java       # → 422 INVALID_STATUS_TRANSITION / BUSINESS_RULE_VIOLATION
+│       └── application/
+│           ├── port/in/
+│           │   └── AppointmentUseCases.java    # book, confirm, start, complete, cancel, noShow, list
+│           ├── port/out/
+│           │   ├── AppointmentRepository.java  # save, findById(tenant, id), overlaps(...)
+│           │   ├── IdempotencyStore.java       # key + resource in the same transaction
+│           │   ├── Outbox.java                 # AppointmentCompleted, AppointmentCancelled …
+│           │   ├── BarbershopCatalog.java      # service price and duration (barbershop-api)
+│           │   ├── IdGenerator.java            # UUID
+│           │   └── Clock.java
+│           └── usecase/
+│               └── AppointmentService.java     # implements AppointmentUseCases
+├── appointment-adapters/
+│   └── src/main/java/…/appointment/adapter/
+│       ├── in/http/
+│       │   ├── AppointmentController.java      # /api/v1/appointments — DTO ↔ use case
+│       │   ├── AuthFilter.java · Rs256Verifier.java   # norm 5.3.7
+│       │   ├── CorrelationFilter.java          # X-Correlation-Id, norm 5.3.9
+│       │   ├── ErrorHandler.java · ApiError.java      # {error, message, details, traceId}
+│       │   └── HealthController.java
+│       └── out/
+│           ├── persistence/JdbcAppointmentRepository.java · JdbcIdempotencyStore.java · JdbcOutbox.java
+│           └── http/BarbershopCatalogClient.java      # service token, bounded retries
+├── appointment-app/
+│   └── src/main/
+│       ├── java/…/appointment/app/AppointmentApplication.java · AppointmentConfiguration.java
+│       └── resources/application.yml              # every explicit limit (norm 5.3.10)
+├── deploy/ (compose.yml, Dockerfile)
+└── pom.xml                                         # parent with the three modules
+```
 
-Defines what the domain can do — its public API from the outside's perspective.
+The schema is **not** here: it lives in `barber-saas-appointment-db` (norm 5.2.1).
 
-```typescript
-// src/domain/order/ports/in/CreateOrderPort.ts
-export interface CreateOrderPort {
-  execute(request: CreateOrderRequest): Promise<CreateOrderResponse>;
+---
+
+## Ports and adapters in BarberSaaS
+
+### Port in — what the service offers
+
+```java
+// appointment-core/.../application/port/in/AppointmentUseCases.java
+public interface AppointmentUseCases {
+    Appointment book(TenantId tenant, Actor actor, BookCommand cmd, IdempotencyKey key);
+    Appointment confirm(TenantId tenant, Actor actor, AppointmentId id);
+    Appointment complete(TenantId tenant, Actor actor, AppointmentId id);
+    // cancel, start, noShow, list …
 }
 ```
 
-### Driven Port (Output Port)
+The tenant is an explicit argument, read from the token by the HTTP adapter — never from the
+body (`07-api/authentication.md`).
 
-Defines what the domain needs from the outside world — without knowing how it is implemented.
+### Port out — what the service needs
 
-```typescript
-// src/domain/order/ports/out/OrderRepositoryPort.ts
-export interface OrderRepositoryPort {
-  save(order: Order): Promise<void>;
-  findById(id: OrderId): Promise<Order | null>;
-  findByCustomer(customerId: CustomerId): Promise<Order[]>;
-}
-
-// src/domain/order/ports/out/EventPublisherPort.ts
-export interface EventPublisherPort {
-  publish(event: DomainEvent): Promise<void>;
+```java
+// appointment-core/.../application/port/out/AppointmentRepository.java
+public interface AppointmentRepository {
+    Optional<Appointment> findById(TenantId tenant, AppointmentId id);   // other tenant → empty → 404
+    boolean overlaps(BarberId barber, LocalDate date, LocalTime start, LocalTime end);
+    void save(Appointment appointment);
 }
 ```
 
----
+### Use case — orchestrates, does not decide
 
-## The Adapters
-
-### Primary Adapter — HTTP Controller
-
-The HTTP controller translates the HTTP request to the domain use case.
-
-```typescript
-// src/infrastructure/adapters/in/http/OrderController.ts
-import { CreateOrderPort } from '@domain/order/ports/in/CreateOrderPort';
-
-@Controller('/orders')
-export class OrderController {
-  constructor(
-    // Inject the port, NOT the concrete implementation
-    private readonly createOrder: CreateOrderPort,
-  ) {}
-
-  @Post('/')
-  async create(@Body() body: CreateOrderHttpRequest): Promise<void> {
-    // Translate HTTP request → domain DTO
-    const request = new CreateOrderRequest(body.customerId, body.items);
-    // Call the use case through the port
-    const response = await this.createOrder.execute(request);
-    return response;
-  }
+```java
+// appointment-core/.../application/usecase/AppointmentService.java
+public Appointment complete(TenantId tenant, Actor actor, AppointmentId id) {
+    Appointment appt = repository.findById(tenant, id).orElseThrow(NotFound::new);
+    appt.complete(actor, clock.now());          // the aggregate enforces the state machine
+    repository.save(appt);                      // same transaction as …
+    outbox.add(AppointmentCompleted.of(appt));  // … the event (norm 5.3.11)
+    return appt;
 }
 ```
 
-### Secondary Adapter — Repository
+### Adapter in — HTTP to use case
 
-The repository implements the driven port. The domain does not know PostgreSQL exists.
-
-```typescript
-// src/infrastructure/adapters/out/persistence/OrderRepositoryImpl.ts
-import { OrderRepositoryPort } from '@domain/order/ports/out/OrderRepositoryPort';
-
-export class OrderRepositoryImpl implements OrderRepositoryPort {
-  constructor(private readonly db: DatabaseConnection) {}
-
-  async save(order: Order): Promise<void> {
-    // Translate Aggregate → database row
-    await this.db.query(
-      'INSERT INTO orders (id, customer_id, status, total) VALUES ($1, $2, $3, $4)',
-      [order.id.value, order.customerId.value, order.status, order.total.amount],
-    );
-  }
-
-  async findById(id: OrderId): Promise<Order | null> {
-    const row = await this.db.queryOne('SELECT * FROM orders WHERE id = $1', [id.value]);
-    if (!row) return null;
-    // Translate database row → Aggregate
-    return OrderMapper.toDomain(row);
-  }
+```java
+// appointment-adapters/.../adapter/in/http/AppointmentController.java
+@PostMapping("/api/v1/appointments/{id}/complete")
+AppointmentResponse complete(@PathVariable UUID id, AuthenticatedUser user) {
+    return AppointmentResponse.from(                                    // never the entity (5.3.4)
+        useCases.complete(user.tenant(), user.actor(), new AppointmentId(id)));
 }
 ```
 
+### Adapter out — JDBC implements the port
+
+`JdbcAppointmentRepository` writes to `appointment.appointment` (`06-data/models.md` §5). The
+exclusion constraint `ex_appointment_no_double_booking` is the final guarantee; the adapter
+translates its violation into the domain's `BUSINESS_RULE_VIOLATION`.
+
 ---
 
-## The Use Case (Application Service)
+## Testing (annex C)
 
-The use case orchestrates the domain. It uses driving and driven ports. It contains no business logic — that lives in the Aggregate.
+| Level | Tests | Needs |
+|---|---|---|
+| Core | Invariants (`INV-APPT-*`), transitions, idempotency by key, bounded page | Nothing: fakes of the ports, no Spring, no database |
+| HTTP | Every `401` variant, error envelope and correlation, field validation, idempotent retry, page limit | The server with in-memory repositories |
+| Integration | Round trip, idempotency key rollback, the double-booking constraint | PostgreSQL with the `-db` schema via `TEST_DATABASE_URL` (skipped if unset) |
 
-```typescript
-// src/application/order/CreateOrderUseCase.ts
-import { CreateOrderPort } from '@domain/order/ports/in/CreateOrderPort';
-import { OrderRepositoryPort } from '@domain/order/ports/out/OrderRepositoryPort';
-import { EventPublisherPort } from '@domain/order/ports/out/EventPublisherPort';
-
-export class CreateOrderUseCase implements CreateOrderPort {
-  constructor(
-    private readonly orderRepo: OrderRepositoryPort,
-    private readonly eventPublisher: EventPublisherPort,
-  ) {}
-
-  async execute(request: CreateOrderRequest): Promise<CreateOrderResponse> {
-    // 1. Create the aggregate (business logic lives HERE, in the domain)
-    const order = Order.create(request.customerId, request.items);
-
-    // 2. Persist (through the port — the use case does not know which DB is used)
-    await this.orderRepo.save(order);
-
-    // 3. Publish domain events (through the port)
-    for (const event of order.domainEvents) {
-      await this.eventPublisher.publish(event);
-    }
-
-    return new CreateOrderResponse(order.id.value);
-  }
+```java
+// appointment-core test — zero external dependencies
+@Test void cannotConfirmACancelledAppointment() {
+    var appt = AppointmentFixtures.cancelled();
+    assertThrows(InvalidStatusTransition.class, () -> appt.confirm(staff, now));
 }
 ```
 
----
-
-## The Dependency Rule
-
-> **Dependencies always point inward.**
-> The domain does not import anything from application or infrastructure.
-> Infrastructure imports from the domain (but never the other way around).
-
-```
-infrastructure/ → application/ → domain/
-                                    ↑
-                         CANNOT import anything from application/ or infrastructure/
-```
-
-### Dependency inversion (DI) in practice
-
-```typescript
-// ✓ Correct — domain defines the interface, infrastructure implements it
-// In domain/:
-export interface OrderRepositoryPort { ... }
-
-// In infrastructure/:
-export class OrderRepositoryImpl implements OrderRepositoryPort { ... }
-
-// In the bootstrap (main.ts), the concrete implementation is injected:
-const orderRepo = new OrderRepositoryImpl(dbConnection);
-const createOrderUseCase = new CreateOrderUseCase(orderRepo, eventPublisher);
-const orderController = new OrderController(createOrderUseCase);
-```
+TDD guide: `11-quality/tdd-guide.md`.
 
 ---
 
-## Advantages for TDD
+## Review checklist (every `-api`, `-worker`, `-workflow`)
 
-Hexagonal architecture is ideal for TDD because:
-
-1. **The domain is testable without framework mocks.** You do not need to start a server
-   or a database to test business logic.
-
-2. **Driven ports can be faked easily.** In tests, you use an
-   in-memory repository (Fake) instead of the real one.
-
-3. **Invariants are explicit** and tested in isolation.
-
-```typescript
-// Domain unit test — zero external dependencies
-describe('Order', () => {
-  it('cannot be created without items', () => {
-    expect(() => Order.create(customerId, [])).toThrow('INV-001');
-  });
-
-  it('on confirm changes status to CONFIRMED', () => {
-    const order = Order.create(customerId, [validItem]);
-    order.confirm();
-    expect(order.status).toBe(OrderStatus.CONFIRMED);
-  });
-
-  it('on confirm emits OrderConfirmed event', () => {
-    const order = Order.create(customerId, [validItem]);
-    order.confirm();
-    expect(order.domainEvents).toContainEqual(expect.any(OrderConfirmedEvent));
-  });
-});
-
-// Use case test with FAKE repository (not a real DB mock)
-describe('CreateOrderUseCase', () => {
-  it('saves the order and publishes the event', async () => {
-    const fakeOrderRepo = new InMemoryOrderRepository();
-    const fakeEventPublisher = new InMemoryEventPublisher();
-    const useCase = new CreateOrderUseCase(fakeOrderRepo, fakeEventPublisher);
-
-    await useCase.execute(new CreateOrderRequest(customerId, [validItem]));
-
-    expect(fakeOrderRepo.orders).toHaveLength(1);
-    expect(fakeEventPublisher.events).toContainEqual(expect.any(OrderCreated));
-  });
-});
-```
-
-> See full TDD guide in `11-quality/tdd-guide.md`
+- [ ] `<domain>-core/pom.xml` declares no Spring, JPA or driver dependency
+- [ ] Domain and use cases import nothing from `adapter` or `app`
+- [ ] Every repository and external call is a `port/out` interface; its implementation is in `adapter/out`
+- [ ] Controllers call a `port/in` interface and map to response DTOs; the entity is never serialized (5.3.4)
+- [ ] The tenant reaches every use case as an argument from the token; every tenant query filters by it
+- [ ] No service reads another domain's database — it calls that domain through a `port/out` HTTP client (norm 7.3)
+- [ ] Events are written to the outbox in the same transaction as the change (5.3.11)
+- [ ] Every explicit limit is declared in `<domain>-app` (`application.yml`, `HikariConfig`) (5.3.10)
+- [ ] One core test per invariant in `02-domain/entities-and-rules.md`, plus the HTTP checks of annex C
 
 ---
 
-## Hexagonal Architecture Checklist
+## Common mistakes
 
-> The checklist below is the textbook version. **What BarberSaaS code review should
-> actually enforce today** (per ADR-002's bounded-context rule, not this literal ports
-> structure):
-> - [ ] No module (`com.barbersaas.<context>`) directly imports another module's repository or service — only shared `com.barbersaas.domain` entities/repositories and `com.barbersaas.security` may be imported across module boundaries
-> - [ ] Every tenant-scoped query filters by `barbershopId` via `TenantContext`
-> - [ ] There is a unit test for each business invariant listed in `02-domain/entities-and-rules.md` (currently: none exist — see `04-requirements/traceability-matrix.md`)
->
-> The textbook checklist below applies only if/when the team decides to actually adopt
-> ports & adapters — it does not describe a rule currently enforced in this codebase:
-
-- [ ] `domain/` has no imports from `infrastructure/` or `application/`
-- [ ] `domain/` has no imports from frameworks (Express, NestJS, TypeORM, etc.)
-- [ ] Every repository interface lives in `domain/ports/out/`
-- [ ] Every use case interface lives in `domain/ports/in/`
-- [ ] Mappers (`toDomain` / `toPersistence`) live in `infrastructure/`, not in `domain/`
-- [ ] HTTP API DTOs live in `infrastructure/adapters/in/http/`, not in `domain/`
-- [ ] There is a unit test for each Aggregate invariant
-
----
-
-## Common mistakes (anti-patterns)
-
-| Anti-pattern | Why it is bad | Solution |
-|-------------|--------------|---------|
-| `import { Repository } from 'typeorm'` in the domain | Couples the domain to TypeORM | Define your own port interface |
-| Business logic in the Controller | If you change the endpoint, you change the business | Move to the Aggregate |
-| Repository returning DTOs instead of Aggregates | The domain cannot validate invariants | Use Mapper to reconstruct the Aggregate |
-| Use case with 15 dependencies | It probably does too much | Split into smaller use cases |
-| `any` in port interfaces | You lose the typed contract | Always use explicit typing |
+| Mistake | Why it is wrong | Fix |
+|---|---|---|
+| `@Entity` / `@Service` in `-core` | Couples the domain to Spring and JPA — and does not compile here | Plain Java in the domain; JPA/JDBC mapping in the adapter |
+| Business rule in the controller | Changing the endpoint changes the business | Move it into the aggregate |
+| Tenant read from the request body | Cross-tenant leak | Tenant only from the validated token |
+| Joining another domain's table | Breaks database-per-service | Port out + HTTP client, or an event projection |
+| `double` for money | Rounding errors | `long` cents (`Money`) |
+| Validating the token only in the gateway | Internal calls enter unauthenticated | `Rs256Verifier` in every service |
 
 ---
 
 ## References and correlations
 
-- Bounded Contexts → `02-domain/domain-map.md`
-- Entities and invariants → `02-domain/entities-and-rules.md`
-- Domain events → `02-domain/domain-events.md`
-- Complementary patterns (CQRS, Event Sourcing, Saga) → `05-architecture/pattern-guide.md`
-- TDD applied to hexagonal architecture → `11-quality/tdd-guide.md`
-- Service template with hexagonal structure → `09-microservices/_template/service/`
+- Bounded contexts → `02-domain/domain-map.md`; invariants → `02-domain/entities-and-rules.md`
+- Language and module layout → ADR-005; data conventions → ADR-010
+- Service catalog and topology → `05-architecture/overview.md`
+- Complementary patterns (Saga, Outbox) → `05-architecture/pattern-guide.md`
+- Course norm 5.3 and annex C → `Normas/C-api-hexagonal.md` (course material)
