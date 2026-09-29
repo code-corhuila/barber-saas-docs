@@ -1,91 +1,97 @@
 # Data Dictionary — BarberSaaS
 
 > Exact meaning of fields whose purpose or valid values aren't obvious from the column name
-> alone. Sourced from `db/init.sql`, the JPA entities in `com.barbersaas.domain.entity`, and
-> the business invariants in `02-domain/entities-and-rules.md`. This is not a repeat of every
-> column in `06-data/models.md` — only the ones where a reader could reasonably get it wrong.
+> alone. The tables are in `06-data/models.md`; the rules behind them in
+> `02-domain/entities-and-rules.md`. This is not a repeat of every column — only the ones where
+> a reader could reasonably get it wrong. Column `snake_case` ↔ contract field `camelCase`.
 
 ---
 
-## Enums and their valid values
+## Closed sets of values
 
-| Field | Table | Type | Valid values | Meaning |
-|-------|-------|------|--------------|---------|
-| `role` | `users` | ENUM | `SUPER_ADMIN`, `ADMIN_BARBERSHOP`, `BARBER`, `CLIENT` | Fixed 4-role RBAC — see `00-governance/security-policy.md`. Not extensible without a schema migration |
-| `status` | `barbershops` | ENUM | `TRIAL`, `ACTIVE`, `SUSPENDED`, `CANCELLED` | Default `TRIAL` on insert. Only `SUPER_ADMIN` may transition it (INV-SHOP-002) |
-| `status` | `appointments` | ENUM | `PENDING`, `CONFIRMED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`, `NO_SHOW` | Default `PENDING`. See the state machine in `02-domain/entities-and-rules.md` — not every transition is legal from every state |
-| `type` | `loyalty_transactions` | ENUM | `STICKER_EARNED`, `REWARD_REDEEMED` | One row per grant or redemption — this table is the audit log, not a config table |
-| `status` | `reward_coupons` | ENUM | `ACTIVE`, `USED` | Transitions `ACTIVE` → `USED` exactly once, when applied to a booking (`appointment_id` gets set at that point) |
-| `type` | `finance_records` | ENUM | `INCOME`, `EXPENSE` | Determines the financial sign; `amount` itself is always stored positive (see below) |
-| `movement_type` | `inventory_movements` | ENUM | `IN`, `OUT` | Direction of a stock change; `quantity` is always positive, direction comes from this field |
-| `type` | `notifications` | ENUM | `APPOINTMENT_CONFIRMATION`, `REMINDER`, `PROMOTION`, `SYSTEM` | See `06-data/models.md` note: cancellations use `SYSTEM`, not a dedicated type; `PROMOTION` is defined but not currently wired to any code path |
-| `discount_type` | `promotions` | ENUM | `PERCENTAGE`, `FIXED_AMOUNT`, `TWO_FOR_ONE` | Undocumented feature (see `06-data/models.md`) — meaning of `discount_value` depends on this: a percentage (0–100) if `PERCENTAGE`, a COP amount if `FIXED_AMOUNT`, ignored if `TWO_FOR_ONE` |
+All are `text` + named `CHECK` (never an engine `ENUM`, ADR-010); the values are identical to the
+enums in `07-api/contracts/openapi/`.
+
+| Field | Domain · table | Valid values | Meaning |
+|-------|----------------|--------------|---------|
+| `role` | identity-auth · `app_user` | `SUPER_ADMIN`, `ADMIN_BARBERSHOP`, `BARBER`, `CLIENT` | Exactly one per user. Fixed 4-role RBAC (`00-governance/security-policy.md`) |
+| `status` | barbershop · `barbershop` | `TRIAL`, `ACTIVE`, `SUSPENDED`, `CANCELLED` | Default `TRIAL`. Only `SUPER_ADMIN` transitions it, through platform-admin (INV-SHOP-002) |
+| `status` | appointment · `appointment` | `PENDING`, `CONFIRMED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`, `NO_SHOW` | Default `PENDING`. Legal transitions: state machine in `02-domain/entities-and-rules.md` |
+| `type` | loyalty · `loyalty_transaction` | `STICKER_EARNED`, `REWARD_REDEEMED` | One row per grant or redemption — the audit log, not configuration |
+| `status` | loyalty · `reward_coupon` | `ACTIVE`, `USED` | `ACTIVE` → `USED` exactly once, when it pays an appointment |
+| `type` | finance-inventory · `finance_record` | `INCOME`, `EXPENSE` | Gives the sign; `amount_cents` is always positive |
+| `movement_type` | finance-inventory · `inventory_movement` | `IN`, `OUT` | Direction; `quantity` is always positive |
+| `type` | notifications · `notification` | `APPOINTMENT_CONFIRMATION`, `REMINDER`, `PROMOTION`, `SYSTEM` | Cancellations are sent as `SYSTEM`; `PROMOTION` is reserved, nothing produces it yet |
+| `platform` | notifications · `device_token` | `ANDROID`, `IOS` | Target of the FCM push |
+| `day_of_week` | schedule · `barber_schedule` | `0`–`6` | `0` = Sunday … `6` = Saturday |
 
 ---
 
 ## Fields with a non-obvious default or business meaning
 
-| Field | Table | Default | Why it matters |
-|-------|-------|---------|-----------------|
-| `barbershop_id` | `users` | `NULL` | `NULL` is not "missing data" — it is the correct, expected value for `SUPER_ADMIN` and `CLIENT` roles, both of which are platform-wide, not barbershop-scoped. A `NOT NULL` constraint here would be a bug |
-| `cancellation_policy_hours` | `barbershops` | `2` | Real seeded/default value (verified in `init.sql`) — a client can cancel a `PENDING`/`CONFIRMED` appointment up to 2 hours before its start time by default. Each barbershop's admin can override this per-shop, but there is no override at the individual-service or individual-appointment level |
-| `price_at_booking` | `appointments` | *(no default — always set at insert)* | A **snapshot**, not a live reference to `services.price`. If a barbershop later changes a service's price, every existing appointment keeps the price it was booked at (INV-APPT-002). Never join to `services.price` to determine what a past appointment cost |
-| `stickers_required` | `loyalty_rewards_config` | `10` | Per-barbershop configurable threshold — do not assume 10 is universal; always read this table, never hardcode |
-| `min_stock_alert` | `inventory_products` | `0` | A product with the default (`0`) effectively has alerting disabled — `current_stock` would have to go negative (which nothing prevents at the DB level) to trigger it. A barbershop must explicitly set a positive threshold to get real alerts |
-| `is_active` (on `services`, `barber_schedules`, `subscription_plans`, `loyalty_rewards_config`, `promotions`) | multiple | `TRUE` | This project's soft-disable pattern — see "Deletion model" below. It is **not** the same concept as `deleted_at` (which doesn't exist in this schema at all) |
-| `used_at` | `reward_coupons` | `NULL` | `NULL` = still `ACTIVE`. Gets a timestamp exactly when `status` flips to `USED`. Do not rely on `status = 'USED'` alone if you need *when* it was used — check this column |
+| Field | Domain · table | Default | Why it matters |
+|-------|----------------|---------|----------------|
+| `barbershop_id` | identity-auth · `app_user` | `NULL` | `NULL` is correct for `SUPER_ADMIN` and `CLIENT` (platform-wide); required for `ADMIN_BARBERSHOP` and `BARBER`. `chk_app_user_tenant` enforces it |
+| `barbershop_id` | every tenant-scoped table | — | Always taken from the JWT, never from the request body. It is a UUID with no foreign key: the barbershop lives in another database |
+| `trial_ends_at` | barbershop · `barbershop` | set at insert | `created_at + 60 days`, never updated (INV-SHOP-001). The worker's expiration job reads it |
+| `cancellation_policy_hours` | barbershop · `barbershop` | `2` | A client may cancel `PENDING`/`CONFIRMED` up to this many hours before start. Per barbershop only |
+| `client_id` | appointment · `appointment` | — | `NULL` means a **walk-in** created by staff. `created_by` always says who booked |
+| `price_at_booking_cents` | appointment · `appointment` | set at insert | **Snapshot** of `service.price_cents` when booked (INV-APPT-002). Never recompute a past appointment's price from the current service price |
+| `stickers_required` | loyalty · `loyalty_rewards_config` | `10` | Per-barbershop threshold; never hardcode 10 |
+| `min_stock_alert` | finance-inventory · `inventory_product` | `0` | `0` disables the alert in practice; `lowStock` is `current_stock <= min_stock_alert`, computed on read |
+| `used_at` | loyalty · `reward_coupon` | `NULL` | Set exactly when `status` becomes `USED` (`chk_reward_coupon_used`) |
+| `read` | notifications · `notification` | `false` | Named `read` (not `is_read`) to match the contract field |
+| `request_hash` | every domain · `idempotency_key` | — | Same `Idempotency-Key` with a different body is rejected instead of returning the first resource |
+| `published_at` | publishing domains · `outbox_event` | `NULL` | `NULL` = not yet published; the relay picks these up in `occurred_at` order |
 
 ---
 
-## Deletion model (there is no soft delete)
+## Identifiers
 
-This schema has **no `deleted_at` column anywhere** — a deliberate departure from the
-generic scaffold's original recommendation (soft delete on every table), confirmed by
-reading every `CREATE TABLE` statement in `init.sql`. Two different mechanisms are used
-instead, and a reader needs to know which applies to which table:
-
-| Mechanism | Applies to | Effect |
-|-----------|-----------|--------|
-| `ON DELETE CASCADE` (hard delete) | Almost every child table hanging off `barbershops` or `users` | Deleting a `barbershops` row physically deletes every `services`, `appointments`, `loyalty_cards`, etc. row for that tenant. There is no recovery path at the DB level |
-| `is_active` boolean flag | `services`, `barber_schedules`, `subscription_plans`, `loyalty_rewards_config`, `promotions` | "Deleting" from the user's point of view is really deactivation — the row stays, historical references (e.g., an old appointment's `service_id`) keep resolving |
-| Status enum, not deletion | `barbershops` (`status = 'CANCELLED'`), `appointments` (`status = 'CANCELLED'`), `reward_coupons` (implicitly via `USED`) | The lifecycle itself has a terminal state; there is no separate delete concept for these |
-
-**Implication:** there is currently no recovery path if a `barbershops` row is ever deleted
-by mistake — everything cascades. If this project needs an "undo," it would need to be
-added (soft delete or an audit/backup mechanism), it doesn't exist today.
+Every `id` is a `uuid` generated by the service's domain core before the insert (ADR-010), so a
+resource has its identity before it reaches the database — needed by idempotent creation and by
+saga steps. In MongoDB `_id` holds the same UUID as a string. A malformed id in a path is a
+`400 VALIDATION_ERROR`, not a `404`.
 
 ---
 
 ## Money and currency
 
-Every monetary field (`price`, `amount`, `discount_value`, `price_at_booking`) is
-`DECIMAL(10,2)`, always in Colombian Pesos (COP) — there is no `currency` column anywhere in
-this schema, unlike the `Money` value object described in
-`02-domain/entities-and-rules.md`, which models `currency` as a field "fixed to COP for the
-MVP." At the database level, COP is not stored, only assumed. If multi-currency is ever
-needed, every monetary column needs a migration to add a `currency` column — there's no
-schema hook for it today.
+Every monetary field is a `bigint` with suffix `_cents` (`price_cents`, `amount_cents`,
+`price_at_booking_cents`), in Colombian pesos × 100: 35,000 COP is stored as `3500000`. There is
+no `currency` column — COP is the only currency of the MVP, as the `Money` value object in
+`02-domain/entities-and-rules.md` states. Quantities that are not money (inventory stock) are
+`numeric(12,2)`; nothing is floating point.
+
+---
+
+## Deletion model (there is no soft delete)
+
+| Mechanism | Applies to | Effect |
+|-----------|-----------|--------|
+| `ON DELETE CASCADE` inside one domain | Children of a row in the same database (`service`, `barber_profile` → `barbershop`; `loyalty_transaction` → `loyalty_card`; `inventory_movement` → `inventory_product`; tokens → `app_user`) | Physical delete within that database only |
+| `is_active` flag | `app_user`, `service`, `barber_schedule`, `loyalty_rewards_config`, `subscription_plan` | "Delete" is deactivation; old references keep resolving |
+| Terminal status | `barbershop` (`CANCELLED`), `appointment` (`CANCELLED`, `NO_SHOW`), `reward_coupon` (`USED`) | The lifecycle ends; the row stays |
+
+A cascade **never crosses domains**: cancelling a barbershop does not delete its appointments or
+loyalty cards in other databases. Those domains react to the barbershop's status through their
+own rules.
 
 ---
 
 ## Time and timezone
 
-- `barbershops.timezone` defaults to `'America/Bogota'` and is stored per barbershop — but
-  every `appointments.appointment_date`/`start_time`/`end_time` is a plain `DATE`/`TIME`
-  with **no timezone attached at the column level** (`TIME`, not `TIMESTAMPTZ`). Correctness
-  depends entirely on the application always interpreting these against the owning
-  barbershop's `timezone`, never against server-local or UTC time. This is a real
-  correctness risk worth a dedicated test (see the untested-paths list in
-  `04-requirements/traceability-matrix.md`).
-- `created_at`/`updated_at` use `TIMESTAMP` (which in MySQL is timezone-aware, stored as UTC
-  and converted on read using the connection's timezone), not `TIMESTAMPTZ`/`DATETIME`. This
-  distinction matters for the Phase 2 PostgreSQL migration — see
-  `06-data/migration-strategy.md`.
+- `created_at`, `updated_at`, `expires_at`, `used_at` and the like are `timestamptz`, stored in
+  UTC and exposed in RFC 3339 (norm 5.3.5).
+- `appointment_date` / `start_time` / `end_time` and the schedule times are local `date`/`time`
+  **in the barbershop's `timezone`** (default `America/Bogota`). They are business wall-clock
+  times, not instants: always interpret them against the owning barbershop's timezone.
 
 ---
 
 ## Correlations
 
-- Full schema and DDL → `06-data/models.md`
+- Tables and constraints → `06-data/models.md`
+- Conventions → `05-architecture/decisions/records/ADR-010-data-conventions-per-domain.md`
 - Business invariants these fields encode → `02-domain/entities-and-rules.md`
-- Migration to PostgreSQL → `06-data/migration-strategy.md`
+- Porting the prototype data → `06-data/migration-strategy.md`

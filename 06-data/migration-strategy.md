@@ -1,128 +1,89 @@
-# Migration Strategy — MySQL → PostgreSQL
+# Migration Strategy — BarberSaaS
 
-> This is the concrete, scheduled migration for BarberSaaS (AT-001 in
-> `05-architecture/overview.md`, Phase 2 / Q4 2026 per `03-product/vision.md`), not a
-> generic migration-tooling guide. Every item below is grounded in the actual
-> `application.yml` config and `db/init.sql` script — read in full for this document.
-
----
-
-## Current state (verified, not assumed)
-
-| Aspect | Value | Source |
-|--------|-------|--------|
-| Engine | MySQL 8.x | `db/init.sql` header comment |
-| JDBC driver | `com.mysql.cj.jdbc.Driver` | `application.yml` |
-| Hibernate dialect | `org.hibernate.dialect.MySQLDialect` (hardcoded, not profile-specific) | `application.yml` |
-| Schema creation | **Manual SQL script** (`db/init.sql`), not Hibernate auto-generation | `ddl-auto: validate` in both `dev` and `prod`... |
-| ...except | `application-dev.yml` overrides to `ddl-auto: update` | Hibernate *can* alter dev schemas automatically; production never does |
-| Migration tool | **None** — no Flyway/Liquibase dependency in `pom.xml` | Verified — schema changes today mean hand-editing `init.sql` |
-
-**Why this matters for the migration plan:** since `ddl-auto: validate` in production, this
-project already treats a hand-written SQL script as its real schema source of truth, not
-Hibernate auto-DDL. The PostgreSQL migration should produce an equivalent hand-written
-script, not rely on pointing Hibernate at an empty Postgres DB and hoping `update` produces
-the right thing — that mode isn't even used in prod.
+> How each domain database is versioned and changed, and how the prototype's schema is ported
+> into the eight `-db` repositories. Tool: Liquibase in all eight (ADR-007); rules: course norm
+> 5.2 and annexes A (PostgreSQL) and B (MongoDB).
 
 ---
 
-## Why this migration is low-risk right now
+## 1. Where migrations live
 
-There is **no production data** to migrate yet — Phase 1 (Private Beta) runs on MySQL with
-seed/test data only (per `01-context/overview_en.md`, production hasn't launched). This means
-the migration can be a **clean cutover** (recreate schema + re-seed on PostgreSQL, or a
-one-time data dump/reload if beta data needs to carry over) rather than a live, zero-downtime
-migration with dual-write or replication. Treat this as the easy version of this problem —
-if it slips past the first real paying barbershops going live, it becomes much harder.
-
----
-
-## MySQL → PostgreSQL: construct-by-construct translation
-
-Every MySQL-specific construct actually used in `db/init.sql`, and its PostgreSQL
-equivalent:
-
-| MySQL construct (in `init.sql`) | PostgreSQL equivalent | Notes |
-|----------------------------------|------------------------|-------|
-| `BIGINT AUTO_INCREMENT PRIMARY KEY` | `BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY` | SQL-standard identity column (Postgres 10+). Avoid legacy `BIGSERIAL` — `GENERATED ALWAYS AS IDENTITY` is the modern, more portable choice |
-| `ENUM('A','B',...)` inline column type | `VARCHAR(n) NOT NULL CHECK (col IN ('A','B',...))` — **recommended**, not a native Postgres `CREATE TYPE ... AS ENUM` | Every entity already uses `@Enumerated(EnumType.STRING)` (verified in `Appointment.java`, `Barbershop.java`, `FinanceRecord.java`, etc.) — Hibernate is *already* reading/writing these columns as plain strings. A native Postgres `ENUM` type adds ALTER-TYPE friction (adding a value requires `ALTER TYPE ... ADD VALUE`, which can't run inside a transaction in older Postgres versions) for no benefit here, since the app never relied on native enum semantics to begin with |
-| `JSON` (on `subscription_plans.features_json`) | `JSONB` | Postgres's `JSONB` is indexable and generally preferred over plain `JSON`; MySQL's `JSON` type is closer in behavior to `JSONB` (validated, not preserving exact formatting) than to Postgres's plain `JSON` |
-| `TIMESTAMP DEFAULT CURRENT_TIMESTAMP` | `TIMESTAMPTZ DEFAULT NOW()` | See "Timestamps and timezone" below — this is the one place where "just translate the syntax" isn't quite enough |
-| `TIMESTAMP ... ON UPDATE CURRENT_TIMESTAMP` | **Drop it — do not replicate with a trigger** | Every entity with an `updated_at` column already has Hibernate's `@UpdateTimestamp` annotation (verified on `Appointment`, `Barbershop`, etc.), which sets the value from the application on every `UPDATE` through JPA. A DB-level trigger would be redundant. Keep it simple: `TIMESTAMPTZ` column, no default-on-update clause, let Hibernate manage it — exactly as it already effectively does today (MySQL's `ON UPDATE` clause is likely never even exercised, since JPA sets the value before the `UPDATE` statement reaches the DB) |
-| `TINYINT` (`barber_schedules.day_of_week`, `reviews.rating`) | `SMALLINT` | Postgres has no `TINYINT`; `SMALLINT` (2 bytes) is the standard substitute, more than sufficient for a 0–6 day-of-week or 1–5 rating |
-| `ENGINE=InnoDB` | *(remove entirely)* | Postgres has no pluggable storage engines — this clause has no equivalent and isn't needed |
-| `CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` (on `CREATE DATABASE`) | `CREATE DATABASE barbersaas ENCODING 'UTF8' LC_COLLATE 'en_US.UTF-8' LC_CTYPE 'en_US.UTF-8'` (or the server's default UTF-8 locale) | Postgres databases are UTF-8 by default in most modern installs; verify Railway's default Postgres image before assuming this needs to be explicit |
-| `CHECK (end_time > start_time)`, `CHECK (rating BETWEEN 1 AND 5)` | Identical syntax | Postgres `CHECK` constraints use the same syntax — no change needed |
-| `DECIMAL(10,2)` | Identical (`NUMERIC(10,2)` is the same type, `DECIMAL` is an accepted alias in Postgres too) | No change needed |
-| `FOREIGN KEY ... ON DELETE CASCADE` / `ON DELETE SET NULL` | Identical syntax | No change needed |
-| `UNIQUE KEY name (cols)` | `CONSTRAINT name UNIQUE (cols)` or a separate `CREATE UNIQUE INDEX` | Minor syntax difference, same guarantee |
+| Rule | Detail |
+|---|---|
+| One owner per schema | Each `barber-saas-<domain>-db` repository holds its domain's changesets and nothing else holds them — not the `-api`, not `-infra` (norm 5.2.1, 7.2) |
+| Single entry point | `changelog/changelog-master.yaml`, one `changelog.yaml` per folder (annex A) |
+| Folder order | `01_ddl/{00_extensions … 10_indexes}` → `02_dml` (seeds) → `03_dcl` (roles) → `04_tcl` → `05_rollbacks` |
+| Tables before keys | Tables are created without foreign keys; keys are added in a later folder, each with its `ON DELETE` (norm 5.2.2) |
+| Runner | `<domain>-db-migrate` container with a pinned Liquibase image, run on demand from `-infra` (`05-architecture/deployment.md` §5) |
+| MongoDB | `notifications-db` uses the Liquibase MongoDB extension; collections, validators and indexes as changesets (annex B) |
 
 ---
 
-## Timestamps and timezone — the one non-mechanical decision
+## 2. Rules for every change
 
-`06-data/data-dictionary.md` already flags that `appointments.appointment_date`/
-`start_time`/`end_time` are plain `DATE`/`TIME` with no timezone, and correctness depends on
-always interpreting them against `barbershops.timezone` (`'America/Bogota'` by default) in
-application code. **This migration does not fix that** — translating `TIME` → `TIME` doesn't
-change the underlying design risk. If this gets addressed, it should be its own decision
-(possibly an ADR), not bundled silently into the engine migration. Recommendation: treat it
-as a separate backlog item, not a blocker for the MySQL → PostgreSQL cutover itself.
-
-For `created_at`/`updated_at`: switch from `TIMESTAMP` to `TIMESTAMPTZ`. MySQL's plain
-`TIMESTAMP` type is already timezone-aware in a specific way (stored as UTC internally,
-converted using the connection's `serverTimezone` — set to `America/Bogota` in the current
-JDBC URL). Postgres's `TIMESTAMPTZ` is the closer equivalent; a plain Postgres `TIMESTAMP`
-(without time zone) would silently drop that behavior.
-
----
-
-## Application-side changes required (beyond the SQL script)
-
-| Change | File | Current value | New value |
-|--------|------|---------------|-----------|
-| JDBC driver dependency | `pom.xml` | `mysql-connector-j` | `org.postgresql:postgresql` |
-| Datasource URL | `application.yml` | `jdbc:mysql://...` | `jdbc:postgresql://...` |
-| Driver class | `application.yml` | `com.mysql.cj.jdbc.Driver` | `org.postgresql.Driver` |
-| Hibernate dialect | `application.yml` | `org.hibernate.dialect.MySQLDialect` | `org.hibernate.dialect.PostgreSQLDialect` |
-| `docker-compose.yml` | `barbersaas-backend/` | MySQL service definition | PostgreSQL service definition (base image, port 5432, volume) |
-
-None of the JPA entity classes themselves (`@Enumerated(EnumType.STRING)`,
-`@CreationTimestamp`, `@UpdateTimestamp`, `@GeneratedValue(strategy = IDENTITY)`) need to
-change — they were already written in an engine-agnostic way. `GenerationType.IDENTITY`
-maps cleanly to Postgres's `GENERATED ALWAYS AS IDENTITY` the same way it mapped to MySQL's
-`AUTO_INCREMENT`.
+1. **An applied changeset is never edited.** A correction is a new changeset; editing one breaks
+   its checksum in every environment that already applied it.
+2. **Every changeset declares its rollback.** If a rollback is impossible (data deletion), the
+   changeset says so in its `comment` and the team records it in an ADR.
+3. **Seeds are idempotent** (`INSERT … ON CONFLICT … DO UPDATE` on a unique key).
+4. **Breaking changes go in two releases** (expand, then contract): add the new column and write
+   both; drop the old one only when no deployed service reads it (norm 5.2.6).
+5. **An index on a table with data is created `CONCURRENTLY`**, in its own changeset with
+   `runInTransaction: false` (norm 5.2.7).
+6. **CI rebuilds from zero** on every pull request: empty database → apply all → roll all back
+   → apply again (`db-ci.yml`, norm 5.2.8).
+7. **Order across environments:** migrate the database before deploying the `-api` version that
+   needs it.
 
 ---
 
-## Rollout plan
+## 3. Porting the prototype schema
 
-1. **Write the PostgreSQL equivalent of `init.sql`** using the translation table above —
-   produces `db/init-postgres.sql` (or convert in place once MySQL is fully retired; keep
-   both during the transition so `docker-compose.yml` can still spin up the old environment
-   if needed for comparison).
-2. **Switch local/dev first** (`application-dev.yml` already tolerates `ddl-auto: update`,
-   giving a safety net while validating the translated schema against real entity mappings).
-3. **Run the full test suite** — this is also the forcing function for
-   `04-requirements/traceability-matrix.md`'s biggest gap: there are currently **zero**
-   automated tests, so there is no regression safety net for this migration today. Writing
-   at least integration tests for the highest-risk paths (FR-008 double-booking lock,
-   FR-027/028 tenant isolation) before or during this migration is strongly recommended —
-   a lock-behavior bug introduced by a dialect change would otherwise go undetected.
-4. **Validate `PESSIMISTIC_WRITE` locking behavior specifically** — lock semantics are one
-   of the few areas where MySQL (InnoDB) and PostgreSQL genuinely differ under the hood
-   (MVCC implementation, gap-locking behavior). The anti-double-booking mechanism
-   (INV-APPT-001) is the single most business-critical piece of logic in this system — treat
-   its behavior under concurrent load on Postgres as something to explicitly verify, not
-   assume carries over identically.
-5. **Staging cutover**, then **production** — per the existing environment plan in
-   `01-context/scope.md`.
+The prototype (`code-corhuila/barber-saas`, MySQL 8, one shared schema) has **no production
+data**, only seeds. Nothing is migrated row by row: each `-db` recreates its tables from
+`06-data/models.md` and re-seeds. The translation is:
+
+| Prototype (MySQL `init.sql`) | Target (per-domain PostgreSQL) | Why |
+|---|---|---|
+| One database `barbersaas` | Eight instances, one per domain | ADR-004, norm 7.1 |
+| `BIGINT AUTO_INCREMENT` ids | `uuid`, generated by the service | ADR-010, norm 5.3.5 |
+| Foreign keys to `users`, `barbershops`, `appointments` from other contexts | Plain `uuid` columns, checked through contracts | Norm 7.4 |
+| `DECIMAL(10,2)` money | `bigint` `_cents`, value × 100 | ADR-010, norm 5.2.5 |
+| `ENUM('A','B')` | `text` + named `CHECK` | Norm 5.2.5 |
+| `VARCHAR(n)` | `text` + `CHECK (char_length(…) <= n)` | Annex A rule 6 |
+| `TINYINT` | `smallint` | No `TINYINT` in PostgreSQL |
+| `TIMESTAMP … ON UPDATE CURRENT_TIMESTAMP` | `timestamptz`, `updated_at` set by the service | UTC storage; no trigger |
+| `JSON` | `jsonb` | Indexable |
+| Plural table names (`appointments`) | Singular (`appointment`), schema named after the domain | Annex A rules 1 and 9 |
+| Pessimistic lock in code for double booking | `EXCLUDE USING gist` in `appointment` | Guarantee in the database |
+| `password_reset_tokens`, `device_tokens` only as JPA entities | Declared tables / collections | The `-db` is the only schema source |
+| `reviews`, `promotions`, `client_favorites`, `gallery_images` | Not ported yet | No bounded context owns them (`models.md` §11) |
+
+**Seeds:** the three subscription plans (platform-admin) and the demo data are rewritten as
+idempotent upserts with fixed UUIDs, so every environment gets the same identifiers and
+re-running the seed changes nothing.
+
+---
+
+## 4. Risks to verify, not assume
+
+- **Double booking (INV-APPT-001)** is the most business-critical rule. The exclusion constraint
+  replaces the prototype's lock; a concurrent-booking test against a real PostgreSQL must prove
+  that the second request gets a `422` and never a second row.
+- **Tenant isolation** is now one filter per service instead of one central `TenantContext`
+  (ADR-004 risks). Every `-api` needs a test that a token for barbershop A cannot read or change
+  a row of barbershop B.
+- **Local times:** `appointment_date`/`start_time`/`end_time` are wall-clock times in the
+  barbershop's timezone; tests around midnight and the barbershop's `timezone` are needed.
+
+`04-requirements/traceability-matrix.md` records zero automated tests today; these three are the
+first ones each affected `-db` / `-api` should have.
 
 ---
 
 ## Correlations
 
-- Schema being migrated → `06-data/models.md`
-- Field-level semantics to preserve → `06-data/data-dictionary.md`
-- Tracked as technical debt AT-001 → `05-architecture/overview.md`
-- Untested paths this migration should not regress → `04-requirements/traceability-matrix.md`
+- Target tables → `06-data/models.md`
+- Conventions → `ADR-010`; engine and tool → `ADR-006`, `ADR-007`
+- Running migrations per environment → `05-architecture/deployment.md`
+- Field semantics to preserve → `06-data/data-dictionary.md`
