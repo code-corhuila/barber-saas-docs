@@ -1,29 +1,44 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
-  title: Notification Service API
-  version: 1.0.0
+  title: barber-saas-notifications-api
+  version: 2.0.0
+  license:
+    name: MIT
+    identifier: MIT
   description: |
-    Planned contract for when notification is extracted from the modular monolith per
-    ADR-003. Not yet an independently deployed service.
+    Service of the **notifications** domain (`barber-saas-notifications-api`, ADR-004): the
+    in-app inbox of each user and the device tokens used for push delivery (FCM).
 
-    Today, `notification` is an internal module of the `barbersaas-backend` monolith
-    (`com.barbersaas.notification`, endpoint prefix `/api/notifications`), sharing the
-    monolith's database and reached through in-process calls — not this contract. This
-    file documents the shape that module's API is expected to keep if/when it is
-    extracted as its own service, per
-    `09-microservices/services/notification/data-model.md` and
-    `09-microservices/services/notification/events.md`.
+    **Upstream origin:** FR-020 (in-app notification on booking, confirmation and
+    cancellation), FR-021 (reminder the day before), FR-022 (notification on completion).
+    Collections `notification` and `device_token` of `notifications-db` (MongoDB),
+    `06-data/models.md` §7.
+
+    2.0.0 — the service is part of the ADR-004 topology (no longer a planned extraction from
+    the monolith): paths under `/api/v1`, `type` fixed to an enum, `Idempotency-Key` on
+    device-token registration.
+
+    ## How notifications are created
+    No endpoint here creates a notification. They are created from domain events
+    (`AppointmentConfirmed`, `AppointmentCancelled`, `AppointmentCompleted`,
+    `AppointmentReminderDue`, `PasswordResetRequested` — `02-domain/domain-events.md`) that other
+    services write to their outbox. Each event produces at most one notification
+    (`sourceEventId` is unique), so a redelivered event does not notify twice.
+
+    ## Authentication and roles
+    JWT Bearer, RS256 (`authentication.md`). Every role reads and marks **only its own**
+    notifications (`userId` = token `sub`); another user's notification answers `404`.
 
 servers:
-  - url: http://localhost:8080/api/notifications
-    description: Local (current, served by the monolith)
-  - url: https://api.dev.{domain}/api/v1/notifications
-    description: Development (planned, once extracted)
+  - url: http://localhost:8000
+    description: Local api-gateway (single entry, norm 5.6.1) — paths include `/api/v1`
+  - url: https://api.dev.{domain}
+    description: Development api-gateway
     variables:
       domain:
         default: example.com
-  - url: https://api.{domain}/api/v1/notifications
-    description: Production (planned, once extracted)
+  - url: https://api.{domain}
+    description: Production api-gateway
     variables:
       domain:
         default: example.com
@@ -33,15 +48,46 @@ security:
 
 tags:
   - name: Notifications
-    description: In-app notifications for the authenticated user
+    description: In-app notifications of the authenticated user
   - name: Device Tokens
-    description: FCM device token registration for push delivery
+    description: FCM device tokens for push delivery
+  - name: Health
+    description: Service health check
 
 paths:
-  /:
+  /health:
     get:
-      summary: List the authenticated user's notifications
-      description: Returns a paginated list of notifications belonging to the caller.
+      summary: Health check
+      description: Internal probe for `barber-saas-infra`; not published through the api-gateway.
+      operationId: healthCheck
+      tags: [Health]
+      security: []
+      servers:
+        - url: http://notifications-api:8080
+          description: Internal compose network
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  timestamp:
+                    $ref: './_shared.yaml#/components/schemas/Timestamp'
+        '503':
+          $ref: './_shared.yaml#/components/responses/ServiceUnavailable'
+
+  /api/v1/notifications:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
+    get:
+      summary: List my notifications
+      description: Paginated, most recent first.
       operationId: listNotifications
       tags: [Notifications]
       parameters:
@@ -49,35 +95,30 @@ paths:
         - $ref: './_shared.yaml#/components/parameters/LimitParam'
         - name: read
           in: query
-          description: Filter by read/unread status
+          description: Filter by read / unread
           schema:
             type: boolean
       responses:
         '200':
-          description: List of notifications
+          description: Page of notifications
           content:
             application/json:
               schema:
-                type: object
-                required: [data, meta]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/NotificationResponse'
-                  meta:
-                    $ref: './_shared.yaml#/components/schemas/PaginatedMeta'
+                $ref: '#/components/schemas/NotificationPage'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
         '401':
           $ref: './_shared.yaml#/components/responses/Unauthorized'
         '500':
           $ref: './_shared.yaml#/components/responses/InternalError'
 
-  /{id}/read:
+  /api/v1/notifications/{id}/read:
     parameters:
       - $ref: './_shared.yaml#/components/parameters/IdParam'
-
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     post:
       summary: Mark a notification as read
+      description: Idempotent — marking an already read notification answers `200` with no change.
       operationId: markNotificationRead
       tags: [Notifications]
       responses:
@@ -86,22 +127,27 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/NotificationResponse'
+                $ref: '#/components/schemas/Notification'
+        '400':
+          $ref: './_shared.yaml#/components/responses/BadRequest'
         '401':
           $ref: './_shared.yaml#/components/responses/Unauthorized'
-        '403':
-          $ref: './_shared.yaml#/components/responses/Forbidden'
         '404':
           $ref: './_shared.yaml#/components/responses/NotFound'
 
-  /device-tokens:
+  /api/v1/device-tokens:
+    parameters:
+      - $ref: './_shared.yaml#/components/parameters/CorrelationIdHeader'
     post:
-      summary: Register a device token for push delivery
+      summary: Register a device token
       description: |
-        Registers (or updates) the FCM token for the authenticated user's device, so
-        push notifications can be delivered to it.
+        Registers the FCM token of the caller's device. The token is unique
+        (`uq_device_token_token`): registering a token that already exists moves it to the
+        caller and answers `200` with it.
       operationId: registerDeviceToken
       tags: [Device Tokens]
+      parameters:
+        - $ref: './_shared.yaml#/components/parameters/IdempotencyKeyHeader'
       requestBody:
         required: true
         content:
@@ -109,15 +155,26 @@ paths:
             schema:
               $ref: '#/components/schemas/RegisterDeviceTokenRequest'
             example:
-              token: "fcm-device-token-example"
+              token: fcm-device-token-example
               platform: ANDROID
       responses:
         '201':
           description: Device token registered
+          headers:
+            Location:
+              $ref: './_shared.yaml#/components/headers/Location'
+            X-Correlation-Id:
+              $ref: './_shared.yaml#/components/headers/X-Correlation-Id'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeviceTokenResponse'
+                $ref: '#/components/schemas/DeviceToken'
+        '200':
+          description: Retry with the same `Idempotency-Key`, or the token already existed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceToken'
         '400':
           $ref: './_shared.yaml#/components/responses/BadRequest'
         '401':
@@ -125,66 +182,86 @@ paths:
 
 components:
   schemas:
-    NotificationResponse:
-      description: An in-app notification belonging to the authenticated user
+    NotificationType:
+      type: string
+      description: |
+        Same values as the `type` validator of the `notification` collection. Cancellations are
+        sent as `SYSTEM`; `PROMOTION` is reserved and nothing produces it yet.
+      enum: [APPOINTMENT_CONFIRMATION, REMINDER, PROMOTION, SYSTEM]
+
+    Platform:
+      type: string
+      enum: [ANDROID, IOS]
+
+    Notification:
+      description: An in-app notification of the authenticated user.
+      type: object
+      required: [id, userId, title, body, type, read, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        userId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        barbershopId:
+          anyOf:
+            - $ref: './_shared.yaml#/components/schemas/UUID'
+            - type: 'null'
+        title:
+          type: string
+          maxLength: 150
+          example: Appointment confirmed
+        body:
+          type: string
+          maxLength: 500
+          example: Your appointment tomorrow at 10:00 has been confirmed.
+        type:
+          $ref: '#/components/schemas/NotificationType'
+        read:
+          type: boolean
+        createdAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+
+    NotificationPage:
       allOf:
-        - $ref: './_shared.yaml#/components/schemas/AuditFields'
+        - $ref: './_shared.yaml#/components/schemas/PaginatedList'
         - type: object
-          required: [id, title, body, type, read, userId]
           properties:
-            id:
-              $ref: './_shared.yaml#/components/schemas/UUID'
-            title:
-              type: string
-              description: Notification headline
-              example: Appointment confirmed
-            body:
-              type: string
-              description: Notification message
-              example: Your appointment tomorrow at 10:00 AM has been confirmed.
-            type:
-              type: string
-              description: >
-                Category of the notification (e.g. appointment confirmed, reminder).
-                See 09-microservices/services/notification/data-model.md — the set of
-                categories is not yet fixed to an enum.
-              example: APPOINTMENT_CONFIRMED
-            read:
-              type: boolean
-              description: Whether the user has opened/dismissed it
-            userId:
-              $ref: './_shared.yaml#/components/schemas/UUID'
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Notification'
 
     RegisterDeviceTokenRequest:
       type: object
+      additionalProperties: false
       required: [token, platform]
       properties:
         token:
           type: string
-          description: FCM device token
-          example: "fcm-device-token-example"
+          minLength: 1
+          maxLength: 4096
+          description: FCM registration token
         platform:
-          type: string
-          description: Device platform
-          enum: [ANDROID, IOS]
+          $ref: '#/components/schemas/Platform'
 
-    DeviceTokenResponse:
-      description: A registered device token
-      allOf:
-        - $ref: './_shared.yaml#/components/schemas/AuditFields'
-        - type: object
-          required: [id, token, platform, userId]
-          properties:
-            id:
-              $ref: './_shared.yaml#/components/schemas/UUID'
-            token:
-              type: string
-              example: "fcm-device-token-example"
-            platform:
-              type: string
-              enum: [ANDROID, IOS]
-            userId:
-              $ref: './_shared.yaml#/components/schemas/UUID'
+    DeviceToken:
+      type: object
+      required: [id, userId, token, platform, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        userId:
+          $ref: './_shared.yaml#/components/schemas/UUID'
+        token:
+          type: string
+        platform:
+          $ref: '#/components/schemas/Platform'
+        createdAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: './_shared.yaml#/components/schemas/Timestamp'
 
   securitySchemes:
     bearerAuth:

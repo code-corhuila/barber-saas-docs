@@ -60,13 +60,13 @@ info:
     barberías asignadas también responde `422`, porque dejaría a esas barberías violando el
     mismo invariante.
 
-    ### DEC-PLAT-03 · `trialEndsAt` es derivado
-    `INV-SHOP-001` fija `trialEndsAt = createdAt + 60 días`, pero `barbershops` no tiene esa
-    columna en 06. Este contrato la expone como campo calculado de solo lectura, sin inventar
-    una columna (OQ-11).
+    ### DEC-PLAT-03 · `trialEndsAt` se lee, no se calcula
+    `INV-SHOP-001` fija `trialEndsAt = createdAt + 60 días` una sola vez al registrar la
+    barbería, y `barbershop.trial_ends_at` lo almacena (`06-data/models.md` §3, OQ-11 cerrada).
+    Este contrato lo expone de solo lectura, tal como lo entrega barbershop (OQ-10).
 
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8000
     description: api-gateway local (única entrada, norma 5.6.1) — las rutas incluyen `/api/v1`
   - url: https://api.dev.{domain}
     description: api-gateway del entorno de desarrollo
@@ -99,7 +99,7 @@ paths:
       tags: [Health]
       security: []
       servers:
-        - url: http://barber-saas-platform-admin-api:8080
+        - url: http://platform-admin-api:8080
           description: Red interna de compose
       responses:
         '200':
@@ -648,7 +648,7 @@ components:
       type: object
       description: |
         Vista de administración de la tabla `barbershops` (DEC-PLAT-01), con `trialEndsAt`
-        derivado (DEC-PLAT-03).
+        almacenado (DEC-PLAT-03).
       required: [id, name, city, status, timezone, cancellationPolicyHours, trialEndsAt, createdAt, updatedAt]
       properties:
         id:
@@ -768,7 +768,7 @@ components:
 
     TrialStatus:
       type: object
-      description: Derivado de `barbershops.created_at` y `status` (DEC-PLAT-03).
+      description: Calculado a partir de `barbershop.trial_ends_at` y `status` (DEC-PLAT-03).
       required: [barbershopId, status, trialStartedAt, trialEndsAt, daysRemaining, expired]
       properties:
         barbershopId:

@@ -12,9 +12,10 @@
 - The version increments only on a breaking change (removed field, changed type, removed
   endpoint). Additive changes (new optional field, new endpoint) do not require a bump.
 - Since [ADR-004](../05-architecture/decisions/records/ADR-004-full-microservice-decomposition.md), each domain is its own service
-  (`barber-saas-<domain>-api`) exposing `/api/v1/<domain-resources>`. The existing contracts
-  still use the monolith's role-prefixed paths (`/api/client`, `/api/admin`, …) — aligning
-  them is tracked in `open-questions.md` OQ-05.
+  (`barber-saas-<domain>-api`) exposing `/api/v1/<domain-resources>`. Every contract uses these
+  paths, with `servers` pointing at the gateway (`http://localhost:8000` locally); the
+  monolith's role-prefixed paths (`/api/client`, `/api/admin`, …) are gone. Role checks happen
+  per operation, not per path prefix.
 - **`barber-saas-api-gateway` is the only entry point** (course norm 5.6.1): clients never call
   a domain service directly, and only the gateway is published to the host. The gateway is
   NGINX configuration (one routes file per domain), not an OpenAPI contract: its own errors
@@ -95,8 +96,7 @@ this document, not a silent deviation from it.
 | 503 | `SERVICE_UNAVAILABLE` — gateway only, target service down |
 
 `409` is not part of the course's closed code list (norm 5.3.5): conflicts with the
-current state are `422`. The contracts that still answer `409` are listed in
-`open-questions.md` OQ-05.
+current state are `422`. No contract answers `409`.
 
 ## Error format
 

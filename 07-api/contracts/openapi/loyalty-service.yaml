@@ -51,7 +51,7 @@ info:
     cliente y barbería (`uq_client_barbershop`).
 
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8000
     description: api-gateway local (única entrada, norma 5.6.1) — las rutas incluyen `/api/v1`
   - url: https://api.dev.{domain}
     description: api-gateway del entorno de desarrollo
@@ -88,7 +88,7 @@ paths:
       tags: [Health]
       security: []
       servers:
-        - url: http://barber-saas-loyalty-api:8080
+        - url: http://loyalty-api:8080
           description: Red interna de compose
       responses:
         '200':
