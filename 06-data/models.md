@@ -494,7 +494,7 @@ CREATE TABLE subscription_plan (
 | Pro | 9990000 | 6 |
 | Premium | 17990000 | 999 |
 
-> These names and prices come from the prototype's seed; `01-context/overview_en.md` lists
+> These names and prices come from the prototype's seed; `01-context/overview.md` lists
 > different ones (Starter/Profesional/Premium). The team still has to confirm which is current.
 
 platform-admin owns no barbershop rows: `/api/v1/platform/barbershops` reads and changes them
@@ -541,7 +541,7 @@ CREATE INDEX idx_outbox_event_unpublished ON outbox_event (occurred_at) WHERE pu
 
 | Prototype table | Why not here |
 |---|---|
-| `reviews`, `promotions`, `client_favorites`, `gallery_images` | Not in `01-context/scope.md`, `02-domain/domain-map.md` or any contract. Their bounded context is a `02-domain` decision; until it is made, no `-db` owns them |
+| `reviews`, `promotions`, `client_favorites`, `gallery_images` | Not in `01-context/scope.md` or any contract. `02-domain/domain-map.md` proposes them for Barbershop Management as supporting subdomains; they get tables in `barbershop-db` only when a user story brings them into scope |
 
 `rating_avg` / `rating_count` on `barber_profile` stay because the contract exposes them; they are
 fed by reviews once that context is decided.

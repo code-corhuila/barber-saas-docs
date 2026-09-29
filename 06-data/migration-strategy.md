@@ -57,7 +57,7 @@ data**, only seeds. Nothing is migrated row by row: each `-db` recreates its tab
 | Plural table names (`appointments`) | Singular (`appointment`), schema named after the domain | Annex A rules 1 and 9 |
 | Pessimistic lock in code for double booking | `EXCLUDE USING gist` in `appointment` | Guarantee in the database |
 | `password_reset_tokens`, `device_tokens` only as JPA entities | Declared tables / collections | The `-db` is the only schema source |
-| `reviews`, `promotions`, `client_favorites`, `gallery_images` | Not ported yet | No bounded context owns them (`models.md` §11) |
+| `reviews`, `promotions`, `client_favorites`, `gallery_images` | Not ported yet | Out of MVP scope; proposed for Barbershop (`models.md` §11) |
 
 **Seeds:** the three subscription plans (platform-admin) and the demo data are rewritten as
 idempotent upserts with fixed UUIDs, so every environment gets the same identifiers and
