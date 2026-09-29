@@ -1,502 +1,558 @@
 # Data Models — BarberSaaS
 
-> Transcribed directly from the real, running schema:
-> `barbersaas-backend/barbersaas-backend/db/init.sql`. Every table, column, type, constraint,
-> and index below exists in that file — nothing here is proposed or aspirational. Where the
-> schema differs from what `02-domain/entities-and-rules.md` describes (e.g., ID types), this
-> document is the one that matches the database; `entities-and-rules.md` was already
-> corrected to agree with it.
+> Target data model: **one database per domain** (ADR-004), PostgreSQL for seven domains and
+> MongoDB for notifications (ADR-006), under the conventions of
+> [ADR-010](../05-architecture/decisions/records/ADR-010-data-conventions-per-domain.md).
+> Every table below backs a resource of `07-api/contracts/openapi/`: same fields
+> (`camelCase` ↔ `snake_case`), same types, same sets of values.
+>
+> Each schema is versioned only in its own `barber-saas-<domain>-db` repository with Liquibase
+> (ADR-007). The DDL here is the reference those changesets implement; in the `-db` repository
+> tables and foreign keys go in separate folders (annex A).
+
+> **History.** Until 2026-09-28 this file transcribed the prototype's `db/init.sql` (MySQL 8,
+> one shared schema, `BIGINT` ids, `DECIMAL` money). That transcription is still available in
+> the git history of this file and in `code-corhuila/barber-saas`. The business rules it
+> surfaced are carried over below; its types are not.
 
 ---
 
-## Engine
+## 1. Ownership map
 
-**Current:** MySQL 8.x, `InnoDB`, `utf8mb4` / `utf8mb4_unicode_ci`. Single database
-(`barbersaas`), single schema — **not** database-per-service. This matches the Modular
-Monolith decision in ADR-002: one deployable unit, one shared schema, tenant isolation via
-`barbershop_id` rather than physical separation.
+| Domain | Database (instance) | Engine | Schema | Owns | Contract |
+|---|---|---|---|---|---|
+| Identity & Auth | `identity-auth-db` | PostgreSQL | `identity_auth` | `app_user`, `refresh_token`, `password_reset_token` | `auth-service.yaml` |
+| Barbershop | `barbershop-db` | PostgreSQL | `barbershop` | `barbershop`, `service`, `barber_profile`, `barber_specialty` | `barbershop-service.yaml` |
+| Schedule | `schedule-db` | PostgreSQL | `schedule` | `barber_schedule`, `schedule_exception` | `schedule-service.yaml` |
+| Appointment | `appointment-db` | PostgreSQL | `appointment` | `appointment` | `appointment-service.yaml` |
+| Loyalty | `loyalty-db` | PostgreSQL | `loyalty` | `loyalty_rewards_config`, `loyalty_card`, `loyalty_transaction`, `reward_coupon` | `loyalty-service.yaml` |
+| Notifications | `notifications-db` | MongoDB (rs0) | `notifications` | `notification`, `device_token` | `notification-service.yaml` |
+| Finance & Inventory | `finance-inventory-db` | PostgreSQL | `finance_inventory` | `finance_record`, `inventory_product`, `inventory_movement` | `finance-inventory-service.yaml` |
+| Platform Admin | `platform-admin-db` | PostgreSQL | `platform_admin` | `subscription_plan` | `platform-admin-service.yaml` |
 
-**Target (Phase 2, not yet migrated):** PostgreSQL 16 — see AT-001 in
-`05-architecture/overview.md`. The migration is expected to be close to 1:1 given standard
-SQL types are used throughout (no MySQL-specific features beyond `ENUM` and `JSON`, both of
-which have PostgreSQL equivalents — PostgreSQL's own `ENUM` type or a `CHECK` constraint, and
-native `JSONB`).
+Every domain that creates resources over HTTP also owns an `idempotency_key` table (§10), and
+every domain that publishes events owns an `outbox_event` table (§10): identity-auth,
+appointment and loyalty.
 
-**ID strategy:** every table uses `BIGINT AUTO_INCREMENT PRIMARY KEY` — **not** UUIDs. This
-is a deliberate, verified fact (not a gap): see the "Not yet on this backlog" note on
-sequential IDs in `04-requirements/functional.md` and the tenant-isolation discussion below.
+### Cross-domain references (no foreign keys)
 
----
-
-## Entity-Relationship diagram
-
-```mermaid
-erDiagram
-    SUBSCRIPTION_PLANS ||--o{ BARBERSHOPS : "assigned to"
-    BARBERSHOPS ||--o{ USERS : "employs (ADMIN_BARBERSHOP, BARBER)"
-    BARBERSHOPS ||--o{ SERVICES : offers
-    BARBERSHOPS ||--o{ INVENTORY_PRODUCTS : stocks
-    BARBERSHOPS ||--o{ FINANCE_RECORDS : records
-    BARBERSHOPS ||--o{ PROMOTIONS : runs
-    BARBERSHOPS ||--o{ GALLERY_IMAGES : showcases
-    BARBERSHOPS ||--o{ LOYALTY_REWARDS_CONFIG : configures
-
-    USERS ||--o| BARBER_PROFILES : "has (if role=BARBER)"
-    USERS ||--o{ APPOINTMENTS : "books (as client)"
-    USERS ||--o{ CLIENT_FAVORITES : favorites
-    USERS ||--o{ NOTIFICATIONS : receives
-    USERS ||--o{ REWARD_COUPONS : holds
-
-    BARBER_PROFILES ||--o{ BARBER_SPECIALTIES : has
-    BARBER_PROFILES ||--o{ BARBER_SCHEDULES : "works per weekday"
-    BARBER_PROFILES ||--o{ SCHEDULE_EXCEPTIONS : "deviates on a date"
-    BARBER_PROFILES ||--o{ APPOINTMENTS : "assigned to"
-
-    SERVICES ||--o{ APPOINTMENTS : "booked for"
-
-    APPOINTMENTS ||--o{ LOYALTY_TRANSACTIONS : "may grant a sticker for"
-    APPOINTMENTS ||--o{ REWARD_COUPONS : "may be paid with"
-    APPOINTMENTS ||--o{ REVIEWS : "may be reviewed"
-    APPOINTMENTS ||--o{ FINANCE_RECORDS : "may generate a"
-
-    LOYALTY_CARDS ||--o{ LOYALTY_TRANSACTIONS : logs
-    LOYALTY_REWARDS_CONFIG ||--|| LOYALTY_CARDS : "threshold for"
-
-    INVENTORY_PRODUCTS ||--o{ INVENTORY_MOVEMENTS : tracks
-```
-
-> This diagram covers foreign-key relationships only. `barbershop_id` also appears directly
-> on most tables as the tenant discriminator (see "Tenant isolation" below) even where not
-> drawn as its own arrow, to avoid a diagram with 15+ lines converging on one node.
+| Column | In | Points to | Checked through |
+|---|---|---|---|
+| `barbershop_id` | every tenant-scoped table | `barbershop.barbershop` | The JWT (tenant claim), never the body |
+| `user_id`, `client_id`, `granted_by_user_id`, `created_by_user_id`, `created_by` | several | `identity_auth.app_user` | The JWT `sub`, or `auth-service` |
+| `barber_profile_id`, `barber_id` | schedule, appointment | `barbershop.barber_profile` | `barbershop-service` |
+| `service_id` | appointment | `barbershop.service` | `barbershop-service` |
+| `appointment_id`, `related_appointment_id` | loyalty, finance | `appointment.appointment` | `appointment-service` |
+| `plan_id` | barbershop | `platform_admin.subscription_plan` | `platform-admin-service` |
 
 ---
 
-## Tables by bounded context
-
-Grouped per `02-domain/domain-map.md`'s bounded contexts, so this document and the domain
-map stay easy to cross-reference.
-
-### Platform Administration — `subscription_plans`
+## 2. Identity & Auth — `identity_auth`
 
 ```sql
-CREATE TABLE subscription_plans (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(50) NOT NULL,
-    price DECIMAL(10,2) NOT NULL,
-    max_barbers INT NOT NULL,
-    features_json JSON NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
+CREATE TABLE app_user (                       -- "user" is reserved in PostgreSQL
+    id                 uuid        NOT NULL,
+    barbershop_id      uuid        NULL,      -- no FK: barbershop domain
+    full_name          text        NOT NULL,
+    email              text        NOT NULL,
+    password_hash      text        NOT NULL,
+    phone              text        NULL,
+    profile_photo_url  text        NULL,
+    role               text        NOT NULL,
+    is_active          boolean     NOT NULL DEFAULT true,
+    created_at         timestamptz NOT NULL DEFAULT now(),
+    updated_at         timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_app_user PRIMARY KEY (id),
+    CONSTRAINT chk_app_user_full_name CHECK (char_length(full_name) BETWEEN 1 AND 120),
+    CONSTRAINT chk_app_user_email     CHECK (char_length(email) <= 150),
+    CONSTRAINT chk_app_user_phone     CHECK (char_length(phone) <= 20),
+    CONSTRAINT chk_app_user_role      CHECK (role IN ('SUPER_ADMIN','ADMIN_BARBERSHOP','BARBER','CLIENT')),
+    CONSTRAINT chk_app_user_tenant    CHECK ((role IN ('ADMIN_BARBERSHOP','BARBER')) = (barbershop_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX uq_app_user_email ON app_user (lower(email));
+CREATE INDEX idx_app_user_barbershop_id ON app_user (barbershop_id);
+
+CREATE TABLE refresh_token (
+    id           uuid        NOT NULL,
+    user_id      uuid        NOT NULL,
+    token_hash   text        NOT NULL,
+    expires_at   timestamptz NOT NULL,        -- issued + 7 days
+    revoked_at   timestamptz NULL,            -- set on rotation or logout
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_refresh_token PRIMARY KEY (id),
+    CONSTRAINT uq_refresh_token_hash UNIQUE (token_hash),
+    CONSTRAINT fk_refresh_token_user FOREIGN KEY (user_id) REFERENCES app_user (id) ON DELETE CASCADE
+);
+CREATE INDEX idx_refresh_token_user_id ON refresh_token (user_id);
+
+CREATE TABLE password_reset_token (
+    id           uuid        NOT NULL,
+    user_id      uuid        NOT NULL,
+    code_hash    text        NOT NULL,        -- 6-digit code, stored hashed
+    expires_at   timestamptz NOT NULL,        -- issued + 15 minutes
+    used_at      timestamptz NULL,            -- single use
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_password_reset_token PRIMARY KEY (id),
+    CONSTRAINT fk_password_reset_token_user FOREIGN KEY (user_id) REFERENCES app_user (id) ON DELETE CASCADE
+);
+CREATE INDEX idx_password_reset_token_user_id ON password_reset_token (user_id);
 ```
 
-**Real seed data (3 plans):**
-
-| name | price (COP) | max_barbers |
-|------|------------|--------------|
-| Basico | 49,900.00 | 2 |
-| Pro | 99,900.00 | 6 |
-| Premium | 179,900.00 | 999 (effectively unlimited) |
-
-> **Flagged inconsistency, not fixed here (out of this folder's scope):** these seeded plan
-> names/prices (Basico/Pro/Premium at 49.9k/99.9k/179.9k) do **not** match the plan names and
-> prices documented in `01-context/overview_en.md` → Monetization model (Starter/Profesional/
-> Premium at 39.9k/79.9k/149.9k). One of the two is stale. Flagging for Daniel to confirm
-> which is the current source of truth — did not overwrite either document to avoid guessing
-> wrong.
+- **One role per user** (`role`, not an array). `SUPER_ADMIN` and `CLIENT` have no
+  `barbershop_id`: a client is platform-wide and visits several barbershops (how a `CLIENT`
+  token is bound to one is OQ-07). `chk_app_user_tenant` enforces this in the database.
+- `refresh_token` and `password_reset_token` existed in the prototype only as JPA entities; here
+  they are explicit tables because rotation (single-use refresh) and the 15-minute code need
+  stored state.
 
 ---
 
-### Barbershop Management — `barbershops`, `services`, `barber_profiles`, `barber_specialties`
+## 3. Barbershop — `barbershop`
 
 ```sql
-CREATE TABLE barbershops (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(120) NOT NULL,
-    address VARCHAR(255),
-    city VARCHAR(80) NOT NULL,
-    latitude DECIMAL(10,7),
-    longitude DECIMAL(10,7),
-    phone VARCHAR(20),
-    whatsapp_number VARCHAR(20),
-    logo_url VARCHAR(255),
-    status ENUM('ACTIVE','SUSPENDED','TRIAL','CANCELLED') NOT NULL DEFAULT 'TRIAL',
-    plan_id BIGINT NULL REFERENCES subscription_plans(id),
-    timezone VARCHAR(50) NOT NULL DEFAULT 'America/Bogota',
-    cancellation_policy_hours INT NOT NULL DEFAULT 2,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
--- Indexes: city, status, (latitude, longitude)
+CREATE TABLE barbershop (
+    id                         uuid          NOT NULL,
+    name                       text          NOT NULL,
+    address                    text          NULL,
+    city                       text          NOT NULL,
+    latitude                   numeric(10,7) NULL,
+    longitude                  numeric(10,7) NULL,
+    phone                      text          NULL,
+    whatsapp_number            text          NULL,
+    logo_url                   text          NULL,
+    status                     text          NOT NULL DEFAULT 'TRIAL',
+    plan_id                    uuid          NULL,          -- no FK: platform-admin domain
+    timezone                   text          NOT NULL DEFAULT 'America/Bogota',
+    cancellation_policy_hours  integer       NOT NULL DEFAULT 2,
+    trial_ends_at              timestamptz   NOT NULL,      -- created_at + 60 days, never updated
+    created_at                 timestamptz   NOT NULL DEFAULT now(),
+    updated_at                 timestamptz   NOT NULL DEFAULT now(),
+    CONSTRAINT pk_barbershop PRIMARY KEY (id),
+    CONSTRAINT chk_barbershop_name     CHECK (char_length(name) BETWEEN 1 AND 120),
+    CONSTRAINT chk_barbershop_address  CHECK (char_length(address) <= 255),
+    CONSTRAINT chk_barbershop_city     CHECK (char_length(city) BETWEEN 1 AND 80),
+    CONSTRAINT chk_barbershop_latitude CHECK (latitude BETWEEN -90 AND 90),
+    CONSTRAINT chk_barbershop_longitude CHECK (longitude BETWEEN -180 AND 180),
+    CONSTRAINT chk_barbershop_phone    CHECK (char_length(phone) <= 20 AND char_length(whatsapp_number) <= 20),
+    CONSTRAINT chk_barbershop_logo_url CHECK (char_length(logo_url) <= 255),
+    CONSTRAINT chk_barbershop_status   CHECK (status IN ('TRIAL','ACTIVE','SUSPENDED','CANCELLED')),
+    CONSTRAINT chk_barbershop_timezone CHECK (char_length(timezone) <= 50),
+    CONSTRAINT chk_barbershop_cancellation_policy CHECK (cancellation_policy_hours >= 0)
+);
+CREATE INDEX idx_barbershop_city_status ON barbershop (city, status);
+CREATE INDEX idx_barbershop_trial_ends_at ON barbershop (trial_ends_at) WHERE status = 'TRIAL';
+
+CREATE TABLE service (
+    id                uuid        NOT NULL,
+    barbershop_id     uuid        NOT NULL,
+    name              text        NOT NULL,
+    description       text        NULL,
+    duration_minutes  integer     NOT NULL,
+    price_cents       bigint      NOT NULL,
+    is_active         boolean     NOT NULL DEFAULT true,
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_service PRIMARY KEY (id),
+    CONSTRAINT fk_service_barbershop FOREIGN KEY (barbershop_id) REFERENCES barbershop (id) ON DELETE CASCADE,
+    CONSTRAINT chk_service_name        CHECK (char_length(name) BETWEEN 1 AND 100),
+    CONSTRAINT chk_service_description CHECK (char_length(description) <= 255),
+    CONSTRAINT chk_service_duration    CHECK (duration_minutes >= 5),
+    CONSTRAINT chk_service_price       CHECK (price_cents >= 0)
+);
+CREATE INDEX idx_service_barbershop_id ON service (barbershop_id);
+
+CREATE TABLE barber_profile (
+    id                uuid         NOT NULL,
+    barbershop_id     uuid         NOT NULL,
+    user_id           uuid         NOT NULL,   -- no FK: identity-auth domain
+    experience_years  integer      NOT NULL DEFAULT 0,
+    bio               text         NULL,
+    rating_avg        numeric(3,2) NOT NULL DEFAULT 0,
+    rating_count      integer      NOT NULL DEFAULT 0,
+    CONSTRAINT pk_barber_profile PRIMARY KEY (id),
+    CONSTRAINT uq_barber_profile_user UNIQUE (user_id),
+    CONSTRAINT fk_barber_profile_barbershop FOREIGN KEY (barbershop_id) REFERENCES barbershop (id) ON DELETE CASCADE,
+    CONSTRAINT chk_barber_profile_experience CHECK (experience_years >= 0),
+    CONSTRAINT chk_barber_profile_bio        CHECK (char_length(bio) <= 500),
+    CONSTRAINT chk_barber_profile_rating     CHECK (rating_avg BETWEEN 0 AND 5 AND rating_count >= 0)
+);
+CREATE INDEX idx_barber_profile_barbershop_id ON barber_profile (barbershop_id);
+
+CREATE TABLE barber_specialty (
+    id                 uuid NOT NULL,
+    barber_profile_id  uuid NOT NULL,
+    specialty_name     text NOT NULL,
+    CONSTRAINT pk_barber_specialty PRIMARY KEY (id),
+    CONSTRAINT fk_barber_specialty_profile FOREIGN KEY (barber_profile_id) REFERENCES barber_profile (id) ON DELETE CASCADE,
+    CONSTRAINT chk_barber_specialty_name CHECK (char_length(specialty_name) BETWEEN 1 AND 80)
+);
+CREATE INDEX idx_barber_specialty_profile_id ON barber_specialty (barber_profile_id);
 ```
 
-> **Note:** `barbershops` has no `trial_ends_at` column, even though
-> `02-domain/entities-and-rules.md` documents `trialEndsAt` as an entity attribute with its
-> own invariant (INV-SHOP-001). Either it's computed in application code from `created_at +
-> 60 days` rather than stored, or it's a genuine schema gap — worth confirming with whoever
-> implemented FR-026 (trial expiration), since an automated expiration job needs a stored
-> value to query against efficiently.
-
-```sql
-CREATE TABLE services (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    name VARCHAR(100) NOT NULL,
-    description VARCHAR(255),
-    duration_minutes INT NOT NULL,
-    price DECIMAL(10,2) NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
--- Index: barbershop_id
-```
-
-```sql
-CREATE TABLE barber_profiles (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    experience_years INT DEFAULT 0,
-    bio VARCHAR(500),
-    rating_avg DECIMAL(3,2) DEFAULT 0.00,
-    rating_count INT DEFAULT 0
-) ENGINE=InnoDB;
-
-CREATE TABLE barber_specialties (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    barber_profile_id BIGINT NOT NULL REFERENCES barber_profiles(id) ON DELETE CASCADE,
-    specialty_name VARCHAR(80) NOT NULL
-) ENGINE=InnoDB;
-```
-
-> `barber_specialties` and `rating_avg`/`rating_count` on `barber_profiles` are real tables/
-> columns **not mentioned anywhere in `02-domain/entities-and-rules.md`** — a genuine
-> doc-vs-code gap on the domain side (out of scope to fix from here; flagging for a future
-> `02-domain` pass). `rating_avg`/`rating_count` imply a review-aggregation mechanism that
-> isn't documented as a business rule anywhere yet.
+- `trial_ends_at` is **stored** (closes OQ-11): INV-SHOP-001 fixes it once at registration and
+  the worker's trial-expiration job (FR-026) queries it through `idx_barbershop_trial_ends_at`.
+- `status` and `plan_id` are changed by platform-admin through barbershop's API, never by
+  writing this database (OQ-10).
+- The barber's name and photo live in `identity_auth.app_user`; `barber_profile` keeps only
+  `user_id` (OQ-08).
 
 ---
 
-### Identity & Auth — `users`
+## 4. Schedule — `schedule`
 
 ```sql
-CREATE TABLE users (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    barbershop_id BIGINT NULL REFERENCES barbershops(id) ON DELETE CASCADE, -- NULL for SUPER_ADMIN and CLIENT
-    full_name VARCHAR(120) NOT NULL,
-    email VARCHAR(150) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    phone VARCHAR(20),
-    profile_photo_url VARCHAR(255),
-    role ENUM('SUPER_ADMIN','ADMIN_BARBERSHOP','BARBER','CLIENT') NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
--- Indexes: role, barbershop_id, email
+CREATE TABLE barber_schedule (
+    id                 uuid    NOT NULL,
+    barbershop_id      uuid    NOT NULL,
+    barber_profile_id  uuid    NOT NULL,       -- no FK: barbershop domain
+    day_of_week        smallint NOT NULL,      -- 0 = Sunday … 6 = Saturday
+    start_time         time    NOT NULL,
+    end_time           time    NOT NULL,
+    is_active          boolean NOT NULL DEFAULT true,
+    CONSTRAINT pk_barber_schedule PRIMARY KEY (id),
+    CONSTRAINT chk_barber_schedule_day  CHECK (day_of_week BETWEEN 0 AND 6),
+    CONSTRAINT chk_barber_schedule_time CHECK (end_time > start_time)
+);
+CREATE INDEX idx_barber_schedule_barber_day ON barber_schedule (barber_profile_id, day_of_week);
+CREATE INDEX idx_barber_schedule_barbershop_id ON barber_schedule (barbershop_id);
+
+CREATE TABLE schedule_exception (
+    id                 uuid    NOT NULL,
+    barbershop_id      uuid    NOT NULL,
+    barber_profile_id  uuid    NOT NULL,       -- no FK: barbershop domain
+    exception_date     date    NOT NULL,
+    is_day_off         boolean NOT NULL DEFAULT true,
+    start_time         time    NULL,
+    end_time           time    NULL,
+    reason             text    NULL,
+    CONSTRAINT pk_schedule_exception PRIMARY KEY (id),
+    CONSTRAINT uq_schedule_exception_barber_date UNIQUE (barber_profile_id, exception_date),
+    CONSTRAINT chk_schedule_exception_reason CHECK (char_length(reason) <= 150),
+    CONSTRAINT chk_schedule_exception_hours  CHECK (
+        (is_day_off AND start_time IS NULL AND end_time IS NULL)
+        OR (NOT is_day_off AND start_time IS NOT NULL AND end_time > start_time))
+);
+CREATE INDEX idx_schedule_exception_barbershop_id ON schedule_exception (barbershop_id);
 ```
 
-> One `users` table for all 4 roles (not one table per role) — `barbershop_id` is the tenant
-> FK, nullable exactly for the two roles that aren't barbershop-scoped (`SUPER_ADMIN`,
-> `CLIENT`). This is the concrete implementation of the "User" entity described in
-> `02-domain/domain-map.md`'s Identity & Auth context.
-
-**Not in this schema:** `password_reset_tokens` and `device_tokens`, even though both are
-referenced as real tables in `02-domain/entities-and-rules.md`'s "Deliberately excluded from
-the domain model" note and confirmed to exist in code (`PasswordResetToken.java`,
-`DeviceToken.java` entities). They are **not** in `init.sql` — likely because
-`spring.jpa.hibernate.ddl-auto` auto-generates them from the JPA entity annotations rather
-than through this manual script. If so, this script is not the complete schema source of
-truth; treat it as accurate for the 21 tables it does define, and treat JPA entity classes as
-the source of truth for anything not listed here.
+- `barbershop_id` is new on both tables: the prototype reached the tenant through a join to
+  `barber_profiles`, which now lives in another database.
+- `uq_schedule_exception_barber_date` keeps AGGR-INV-BARBER-002 (one exception per barber per
+  date, overriding the weekly schedule). `chk_schedule_exception_hours` moves the "custom hours
+  need both times" rule from application code into the database.
+- `/api/v1/availability` is computed, not stored (how schedule learns about bookings is OQ-09).
 
 ---
 
-### Schedule — `barber_schedules`, `schedule_exceptions`
+## 5. Appointment — `appointment`
 
 ```sql
-CREATE TABLE barber_schedules (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    barber_profile_id BIGINT NOT NULL REFERENCES barber_profiles(id) ON DELETE CASCADE,
-    day_of_week TINYINT NOT NULL, -- 0=Sunday ... 6=Saturday
-    start_time TIME NOT NULL,
-    end_time TIME NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    CONSTRAINT chk_schedule_time CHECK (end_time > start_time)
-) ENGINE=InnoDB;
--- Index: (barber_profile_id, day_of_week)
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
-CREATE TABLE schedule_exceptions (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    barber_profile_id BIGINT NOT NULL REFERENCES barber_profiles(id) ON DELETE CASCADE,
-    exception_date DATE NOT NULL,
-    is_day_off BOOLEAN NOT NULL DEFAULT TRUE,
-    start_time TIME NULL,
-    end_time TIME NULL,
-    reason VARCHAR(150)
-) ENGINE=InnoDB;
--- Unique index: (barber_profile_id, exception_date) — one exception row per barber per date
+CREATE TABLE appointment (
+    id                      uuid        NOT NULL,
+    barbershop_id           uuid        NOT NULL,
+    client_id               uuid        NULL,     -- NULL = walk-in created by staff
+    barber_id               uuid        NOT NULL, -- barber_profile id, no FK
+    service_id              uuid        NOT NULL, -- no FK: barbershop domain
+    appointment_date        date        NOT NULL,
+    start_time              time        NOT NULL,
+    end_time                time        NOT NULL,
+    status                  text        NOT NULL DEFAULT 'PENDING',
+    price_at_booking_cents  bigint      NOT NULL,
+    notes                   text        NULL,
+    cancelled_reason        text        NULL,
+    created_by              uuid        NOT NULL, -- user who booked (client or staff)
+    created_at              timestamptz NOT NULL DEFAULT now(),
+    updated_at              timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_appointment PRIMARY KEY (id),
+    CONSTRAINT chk_appointment_status CHECK (status IN ('PENDING','CONFIRMED','IN_PROGRESS','COMPLETED','CANCELLED','NO_SHOW')),
+    CONSTRAINT chk_appointment_time   CHECK (end_time > start_time),
+    CONSTRAINT chk_appointment_price  CHECK (price_at_booking_cents >= 0),
+    CONSTRAINT chk_appointment_notes  CHECK (char_length(notes) <= 500),
+    CONSTRAINT chk_appointment_cancelled_reason CHECK (char_length(cancelled_reason) <= 255),
+    CONSTRAINT ex_appointment_no_double_booking EXCLUDE USING gist (
+        barber_id WITH =,
+        tsrange(appointment_date + start_time, appointment_date + end_time) WITH &&
+    ) WHERE (status NOT IN ('CANCELLED','NO_SHOW'))
+);
+CREATE INDEX idx_appointment_barbershop_date ON appointment (barbershop_id, appointment_date);
+CREATE INDEX idx_appointment_client_id ON appointment (client_id);
+CREATE INDEX idx_appointment_status ON appointment (status);
 ```
 
-The `CHECK (end_time > start_time)` constraint is the real, DB-level enforcement of the
-"no zero/negative-length schedule slot" rule. The unique index on
-`(barber_profile_id, exception_date)` is what makes AGGR-INV-BARBER-002
-(`02-domain/entities-and-rules.md`: an exception overrides, never merges with, the weekly
-schedule) actually enforceable — there can only be one exception row per barber per date.
+- **Walk-in:** `client_id` is nullable, as `appointment-service.yaml` declares (the prototype's
+  `NOT NULL` blocked F-13). Only staff (`BARBER`, `ADMIN_BARBERSHOP`) may create an appointment
+  with no client; the service checks the role of `created_by`, which is always set.
+- **No double booking (INV-APPT-001)** is enforced by the database: two active appointments of
+  the same barber cannot overlap in time. The prototype relied on a pessimistic lock in code;
+  the lock remains useful to return a clean `422`, but the constraint is the guarantee.
+- `price_at_booking_cents` is computed by the service from `service.price_cents` at booking
+  time and never changes (INV-APPT-002). The contract still names it `priceAtBooking` as a
+  `double`; it moves to `priceAtBookingCents` in the 07 alignment.
 
 ---
 
-### Appointment (Core Domain) — `appointments`
-
-```sql
-CREATE TABLE appointments (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    client_id BIGINT NOT NULL REFERENCES users(id),
-    barber_id BIGINT NOT NULL REFERENCES barber_profiles(id),
-    service_id BIGINT NOT NULL REFERENCES services(id),
-    appointment_date DATE NOT NULL,
-    start_time TIME NOT NULL,
-    end_time TIME NOT NULL,
-    status ENUM('PENDING','CONFIRMED','IN_PROGRESS','COMPLETED','CANCELLED','NO_SHOW') NOT NULL DEFAULT 'PENDING',
-    price_at_booking DECIMAL(10,2) NOT NULL,
-    notes VARCHAR(500),
-    cancelled_reason VARCHAR(255) NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
--- Indexes: (barber_id, appointment_date, start_time), (barbershop_id, appointment_date),
---          client_id, status
-```
-
-> **Real discrepancy from `02-domain/entities-and-rules.md`:** the domain doc lists
-> `clientId` as "Yes (nullable for walk-ins)" to support walk-in clients without an account.
-> The real column is `client_id BIGINT NOT NULL` — **not nullable**. Since walk-in tracking
-> is itself documented as "in progress" (`01-context/scope.md`, feature F-13), this schema
-> constraint is likely the actual current blocker: walk-ins can't be persisted without first
-> either making this column nullable or creating a placeholder `CLIENT` user record per
-> walk-in. Worth surfacing to whoever picks up F-13.
-
-The `(barber_id, appointment_date, start_time)` index is what makes the anti-double-booking
-pessimistic lock (INV-APPT-001) fast — it's the exact lookup pattern
-`AppointmentService.create()` uses to find conflicting bookings before locking.
-
----
-
-### Loyalty & Rewards — `loyalty_rewards_config`, `loyalty_cards`, `loyalty_transactions`, `reward_coupons`
+## 6. Loyalty — `loyalty`
 
 ```sql
 CREATE TABLE loyalty_rewards_config (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    stickers_required INT NOT NULL DEFAULT 10,
-    reward_description VARCHAR(255) NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE
-) ENGINE=InnoDB;
-
-CREATE TABLE loyalty_cards (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    client_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    stickers_count INT NOT NULL DEFAULT 0,
-    total_rewards_redeemed INT NOT NULL DEFAULT 0,
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_client_barbershop (client_id, barbershop_id)
-) ENGINE=InnoDB;
-
-CREATE TABLE loyalty_transactions (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    loyalty_card_id BIGINT NOT NULL REFERENCES loyalty_cards(id) ON DELETE CASCADE,
-    appointment_id BIGINT NULL REFERENCES appointments(id),
-    type ENUM('STICKER_EARNED','REWARD_REDEEMED') NOT NULL,
-    granted_by_user_id BIGINT NOT NULL REFERENCES users(id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
-
-CREATE TABLE reward_coupons (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    client_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    status ENUM('ACTIVE', 'USED') NOT NULL DEFAULT 'ACTIVE',
-    appointment_id BIGINT NULL REFERENCES appointments(id) ON DELETE SET NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    used_at TIMESTAMP NULL
+    id                  uuid    NOT NULL,
+    barbershop_id       uuid    NOT NULL,
+    stickers_required   integer NOT NULL DEFAULT 10,
+    reward_description  text    NOT NULL,
+    is_active           boolean NOT NULL DEFAULT true,
+    CONSTRAINT pk_loyalty_rewards_config PRIMARY KEY (id),
+    CONSTRAINT uq_loyalty_rewards_config_barbershop UNIQUE (barbershop_id),
+    CONSTRAINT chk_loyalty_rewards_config_stickers CHECK (stickers_required >= 1),
+    CONSTRAINT chk_loyalty_rewards_config_description CHECK (char_length(reward_description) BETWEEN 1 AND 255)
 );
--- Index: (client_id, barbershop_id, status) — the exact lookup for "does this client have an active coupon here?"
+
+CREATE TABLE loyalty_card (
+    id                      uuid        NOT NULL,
+    barbershop_id           uuid        NOT NULL,
+    client_id               uuid        NOT NULL,   -- no FK: identity-auth domain
+    stickers_count          integer     NOT NULL DEFAULT 0,
+    total_rewards_redeemed  integer     NOT NULL DEFAULT 0,
+    last_updated            timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_loyalty_card PRIMARY KEY (id),
+    CONSTRAINT uq_loyalty_card_client_barbershop UNIQUE (client_id, barbershop_id),
+    CONSTRAINT chk_loyalty_card_counts CHECK (stickers_count >= 0 AND total_rewards_redeemed >= 0)
+);
+CREATE INDEX idx_loyalty_card_barbershop_id ON loyalty_card (barbershop_id);
+
+CREATE TABLE loyalty_transaction (
+    id                  uuid        NOT NULL,
+    loyalty_card_id     uuid        NOT NULL,
+    appointment_id      uuid        NULL,       -- no FK: appointment domain
+    type                text        NOT NULL,
+    granted_by_user_id  uuid        NOT NULL,   -- no FK: identity-auth domain
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_loyalty_transaction PRIMARY KEY (id),
+    CONSTRAINT fk_loyalty_transaction_card FOREIGN KEY (loyalty_card_id) REFERENCES loyalty_card (id) ON DELETE CASCADE,
+    CONSTRAINT chk_loyalty_transaction_type CHECK (type IN ('STICKER_EARNED','REWARD_REDEEMED'))
+);
+CREATE INDEX idx_loyalty_transaction_card_id ON loyalty_transaction (loyalty_card_id);
+CREATE UNIQUE INDEX uq_loyalty_transaction_sticker_per_appointment
+    ON loyalty_transaction (appointment_id) WHERE type = 'STICKER_EARNED';
+
+CREATE TABLE reward_coupon (
+    id              uuid        NOT NULL,
+    barbershop_id   uuid        NOT NULL,
+    client_id       uuid        NOT NULL,
+    status          text        NOT NULL DEFAULT 'ACTIVE',
+    appointment_id  uuid        NULL,           -- set when the coupon pays an appointment
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    used_at         timestamptz NULL,
+    CONSTRAINT pk_reward_coupon PRIMARY KEY (id),
+    CONSTRAINT chk_reward_coupon_status CHECK (status IN ('ACTIVE','USED')),
+    CONSTRAINT chk_reward_coupon_used   CHECK ((status = 'USED') = (used_at IS NOT NULL))
+);
+CREATE INDEX idx_reward_coupon_client_barbershop_status ON reward_coupon (client_id, barbershop_id, status);
 ```
 
-`loyalty_transactions` is the one real append-only event log in the system — see
-`02-domain/domain-events.md`'s `StickerGranted`/`RewardRedeemed` events, which map directly
-to a row here. The `uq_client_barbershop` unique key on `loyalty_cards` is the DB-level
-guarantee behind "a client has one card per barbershop."
+- `loyalty_transaction` stays the append-only log behind `StickerGranted` / `RewardRedeemed`.
+  `uq_loyalty_transaction_sticker_per_appointment` makes "one sticker per completed
+  appointment" a database rule, which matters now that the sticker arrives by event and can be
+  delivered twice.
+- `uq_loyalty_rewards_config_barbershop`: one active reward rule per barbershop, as the
+  contract exposes a single `/loyalty/config`.
 
 ---
 
-### Finance & Inventory — `finance_records`, `inventory_products`, `inventory_movements`
+## 7. Notifications — `notifications` (MongoDB)
+
+Collections follow annex B and ADR-006: `$jsonSchema` validator with
+`additionalProperties: false`, `validationLevel: strict`, `validationAction: error`.
+
+**`notification`**
+
+| Field | BSON type | Rule |
+|---|---|---|
+| `_id` | string (UUID) | required |
+| `userId` | string (UUID) | required; referenced, not embedded |
+| `barbershopId` | string (UUID) or null | tenant, when the notification belongs to one |
+| `title` | string | required, ≤ 150 |
+| `body` | string | required, ≤ 500 |
+| `type` | string | required, one of `APPOINTMENT_CONFIRMATION`, `REMINDER`, `PROMOTION`, `SYSTEM` |
+| `read` | bool | required, default `false` |
+| `sourceEventId` | string (UUID) or null | the event that produced it; unique when present |
+| `deliveryAttempts` | array, `maxItems: 10` | embedded `{channel: PUSH\|EMAIL, status: SENT\|FAILED, attemptedAt, errorCode?}` |
+| `createdAt`, `updatedAt` | date | required |
+| `createdBy` | string (UUID) or null | null when created by an event |
+
+Indexes: `idx_notification_user_read` on `{userId: 1, read: 1, createdAt: -1}`;
+`uq_notification_source_event` unique on `sourceEventId` (partial, when it exists), so a
+redelivered event does not notify twice.
+
+**`device_token`**
+
+| Field | BSON type | Rule |
+|---|---|---|
+| `_id` | string (UUID) | required |
+| `userId` | string (UUID) | required |
+| `token` | string | required, FCM token |
+| `platform` | string | required, `ANDROID` or `IOS` |
+| `createdAt`, `updatedAt` | date | required |
+
+Index: `uq_device_token_token` unique on `token` (re-registering the same device updates it).
+
+- The prototype had no `device_tokens` table in `init.sql` (it existed only as a JPA entity);
+  here it is a declared collection backing `POST /device-tokens`.
+- The `type` values are the prototype's four. The contract still describes `type` as free text;
+  it is fixed to this enum in the 07 alignment.
+
+---
+
+## 8. Finance & Inventory — `finance_inventory`
 
 ```sql
-CREATE TABLE finance_records (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    type ENUM('INCOME','EXPENSE') NOT NULL,
-    category VARCHAR(80) NOT NULL,
-    amount DECIMAL(10,2) NOT NULL,
-    description VARCHAR(255),
-    record_date DATE NOT NULL,
-    related_appointment_id BIGINT NULL REFERENCES appointments(id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
--- Indexes: (barbershop_id, record_date), type
+CREATE TABLE finance_record (
+    id                      uuid        NOT NULL,
+    barbershop_id           uuid        NOT NULL,
+    type                    text        NOT NULL,
+    category                text        NOT NULL,
+    amount_cents            bigint      NOT NULL,
+    description             text        NULL,
+    record_date             date        NOT NULL,
+    related_appointment_id  uuid        NULL,   -- no FK: appointment domain
+    created_at              timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_finance_record PRIMARY KEY (id),
+    CONSTRAINT chk_finance_record_type        CHECK (type IN ('INCOME','EXPENSE')),
+    CONSTRAINT chk_finance_record_category    CHECK (char_length(category) BETWEEN 1 AND 80),
+    CONSTRAINT chk_finance_record_amount      CHECK (amount_cents > 0),
+    CONSTRAINT chk_finance_record_description CHECK (char_length(description) <= 255)
+);
+CREATE INDEX idx_finance_record_barbershop_date ON finance_record (barbershop_id, record_date);
+
+CREATE TABLE inventory_product (
+    id               uuid          NOT NULL,
+    barbershop_id    uuid          NOT NULL,
+    name             text          NOT NULL,
+    description      text          NULL,
+    unit             text          NOT NULL DEFAULT 'unidad',
+    current_stock    numeric(12,2) NOT NULL DEFAULT 0,
+    min_stock_alert  numeric(12,2) NOT NULL DEFAULT 0,
+    created_at       timestamptz   NOT NULL DEFAULT now(),
+    CONSTRAINT pk_inventory_product PRIMARY KEY (id),
+    CONSTRAINT chk_inventory_product_name  CHECK (char_length(name) BETWEEN 1 AND 120),
+    CONSTRAINT chk_inventory_product_description CHECK (char_length(description) <= 255),
+    CONSTRAINT chk_inventory_product_unit  CHECK (char_length(unit) BETWEEN 1 AND 20),
+    CONSTRAINT chk_inventory_product_stock CHECK (current_stock >= 0 AND min_stock_alert >= 0)
+);
+CREATE INDEX idx_inventory_product_barbershop_id ON inventory_product (barbershop_id);
+
+CREATE TABLE inventory_movement (
+    id                  uuid          NOT NULL,
+    product_id          uuid          NOT NULL,
+    movement_type       text          NOT NULL,
+    quantity            numeric(12,2) NOT NULL,
+    reason              text          NULL,
+    created_by_user_id  uuid          NOT NULL,  -- no FK: identity-auth domain
+    created_at          timestamptz   NOT NULL DEFAULT now(),
+    CONSTRAINT pk_inventory_movement PRIMARY KEY (id),
+    CONSTRAINT fk_inventory_movement_product FOREIGN KEY (product_id) REFERENCES inventory_product (id) ON DELETE CASCADE,
+    CONSTRAINT chk_inventory_movement_type     CHECK (movement_type IN ('IN','OUT')),
+    CONSTRAINT chk_inventory_movement_quantity CHECK (quantity > 0),
+    CONSTRAINT chk_inventory_movement_reason   CHECK (char_length(reason) <= 255)
+);
+CREATE INDEX idx_inventory_movement_product_created ON inventory_movement (product_id, created_at);
 ```
 
-> **Note:** the schema has no `CHECK (amount > 0)` constraint — the "amount must be positive"
-> rule (`02-domain/entities-and-rules.md`, FR-017 in `04-requirements/functional.md`) is
-> enforced only in application code (`@Valid` / service-layer validation), not at the
-> database level. A direct SQL insert (or a future bug bypassing validation) could still
-> write a zero/negative amount. Worth a `CHECK` constraint in a future migration.
+- `chk_finance_record_amount` closes the prototype gap where "amount must be positive" lived
+  only in application code (FR-017).
+- Stock is a quantity, not money: `numeric(12,2)` (millilitres, units), never floating point.
+  `lowStock` in the contract is computed (`current_stock <= min_stock_alert`), not stored.
+- `inventory_movement` reaches the tenant through its product; `chk_inventory_product_stock`
+  rejects an `OUT` movement that would leave negative stock.
+
+---
+
+## 9. Platform Admin — `platform_admin`
 
 ```sql
-CREATE TABLE inventory_products (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    name VARCHAR(120) NOT NULL,
-    description VARCHAR(255),
-    unit VARCHAR(20) NOT NULL DEFAULT 'unidad',
-    current_stock DECIMAL(10,2) NOT NULL DEFAULT 0,
-    min_stock_alert DECIMAL(10,2) NOT NULL DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
-
-CREATE TABLE inventory_movements (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    product_id BIGINT NOT NULL REFERENCES inventory_products(id) ON DELETE CASCADE,
-    movement_type ENUM('IN','OUT') NOT NULL,
-    quantity DECIMAL(10,2) NOT NULL,
-    reason VARCHAR(255),
-    created_by_user_id BIGINT NOT NULL REFERENCES users(id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
--- Index: (product_id, created_at)
+CREATE TABLE subscription_plan (
+    id             uuid        NOT NULL,
+    name           text        NOT NULL,
+    price_cents    bigint      NOT NULL,
+    max_barbers    integer     NOT NULL,
+    features_json  jsonb       NULL,     -- exposed by the contract as a JSON string
+    is_active      boolean     NOT NULL DEFAULT true,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_subscription_plan PRIMARY KEY (id),
+    CONSTRAINT uq_subscription_plan_name UNIQUE (name),
+    CONSTRAINT chk_subscription_plan_name  CHECK (char_length(name) BETWEEN 1 AND 50),
+    CONSTRAINT chk_subscription_plan_price CHECK (price_cents >= 0),
+    CONSTRAINT chk_subscription_plan_max_barbers CHECK (max_barbers >= 1)
+);
 ```
 
-`current_stock` and `min_stock_alert` are `DECIMAL(10,2)`, not integers — stock is tracked
-fractionally (e.g., `2000.00 ml` of shampoo, per the real seed data), not just as whole-unit
-counts. The "stock alert" logic (`current_stock <= min_stock_alert`) is computed in
-application code on read, not as a stored/generated column.
+**Seed (idempotent upsert on `name`), converted from the prototype:**
+
+| name | price_cents | max_barbers |
+|---|---|---|
+| Basico | 4990000 | 2 |
+| Pro | 9990000 | 6 |
+| Premium | 17990000 | 999 |
+
+> These names and prices come from the prototype's seed; `01-context/overview.md` lists
+> different ones (Starter/Profesional/Premium). The team still has to confirm which is current.
+
+platform-admin owns no barbershop rows: `/api/v1/platform/barbershops` reads and changes them
+through barbershop's API (OQ-10).
 
 ---
 
-### Notifications — `notifications`
+## 10. Tables every creating domain repeats
 
 ```sql
-CREATE TABLE notifications (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    title VARCHAR(150) NOT NULL,
-    body VARCHAR(500) NOT NULL,
-    type ENUM('APPOINTMENT_CONFIRMATION','REMINDER','PROMOTION','SYSTEM') NOT NULL,
-    is_read BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
--- Index: (user_id, is_read)
+CREATE TABLE idempotency_key (
+    key            text        NOT NULL,     -- Idempotency-Key header, 8–128 chars
+    operation      text        NOT NULL,     -- e.g. 'POST /api/v1/appointments'
+    resource_id    uuid        NOT NULL,     -- the resource created with this key
+    request_hash   text        NOT NULL,     -- same key + different body → 422
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_idempotency_key PRIMARY KEY (key, operation),
+    CONSTRAINT chk_idempotency_key_length CHECK (char_length(key) BETWEEN 8 AND 128)
+);
+
+CREATE TABLE outbox_event (                  -- identity-auth, appointment, loyalty
+    id              uuid        NOT NULL,
+    aggregate_type  text        NOT NULL,     -- 'appointment', 'loyalty_card', 'app_user'
+    aggregate_id    uuid        NOT NULL,
+    event_type      text        NOT NULL,     -- e.g. 'AppointmentCompleted'
+    payload         jsonb       NOT NULL,
+    correlation_id  text        NOT NULL,
+    occurred_at     timestamptz NOT NULL DEFAULT now(),
+    published_at    timestamptz NULL,
+    CONSTRAINT pk_outbox_event PRIMARY KEY (id)
+);
+CREATE INDEX idx_outbox_event_unpublished ON outbox_event (occurred_at) WHERE published_at IS NULL;
 ```
 
-The `type` enum has exactly 4 values — matches `Notification.Type` in the Java entity
-exactly (verified in `com.barbersaas.domain.entity.Notification`). Note there is no distinct
-type for "appointment cancelled" — per `02-domain/domain-events.md`, that notification is
-actually sent with `type = SYSTEM`, not a dedicated cancellation type. `PROMOTION` exists in
-the enum but nothing in the reviewed code path currently creates a `PROMOTION` notification —
-likely reserved for the `promotions` table below, not yet wired up.
+- The resource and its `idempotency_key` row are written in **one transaction** (norm 5.3.8).
+- The change and its `outbox_event` row are written in **one transaction** (norm 5.3.11);
+  publishing is done afterwards, by a separate process (transport pending, AT-004 in
+  `05-architecture/overview.md`). Events per domain: `02-domain/domain-events.md`.
+- In MongoDB (notifications) both are collections with the same fields.
 
 ---
 
-### Not yet mapped to a bounded context in `domain-map.md`
+## 11. Prototype tables not carried over
 
-These three tables are real and implemented, but aren't mentioned in
-`02-domain/domain-map.md`'s bounded-context list at all — a gap on the domain-modeling side,
-not something to invent a bounded context for here.
+| Prototype table | Why not here |
+|---|---|
+| `reviews`, `promotions`, `client_favorites`, `gallery_images` | Not in `01-context/scope.md` or any contract. `02-domain/domain-map.md` proposes them for Barbershop Management as supporting subdomains; they get tables in `barbershop-db` only when a user story brings them into scope |
 
-```sql
-CREATE TABLE reviews (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    client_id BIGINT NOT NULL REFERENCES users(id),
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    barber_profile_id BIGINT NULL REFERENCES barber_profiles(id),
-    appointment_id BIGINT NULL REFERENCES appointments(id),
-    rating TINYINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
-    comment VARCHAR(500),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
--- Indexes: barbershop_id, barber_profile_id
-
-CREATE TABLE promotions (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    title VARCHAR(120) NOT NULL,
-    description VARCHAR(255),
-    discount_type ENUM('PERCENTAGE','FIXED_AMOUNT','TWO_FOR_ONE') NOT NULL,
-    discount_value DECIMAL(10,2) NOT NULL,
-    valid_from DATE NOT NULL,
-    valid_to DATE NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE
-) ENGINE=InnoDB;
--- Index: (barbershop_id, is_active)
-
-CREATE TABLE client_favorites (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    client_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_client_favorite (client_id, barbershop_id)
-) ENGINE=InnoDB;
-
-CREATE TABLE gallery_images (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    barbershop_id BIGINT NOT NULL REFERENCES barbershops(id) ON DELETE CASCADE,
-    barber_profile_id BIGINT NULL REFERENCES barber_profiles(id),
-    image_url VARCHAR(255) NOT NULL,
-    caption VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
-```
-
-None of `reviews`, `promotions`, `client_favorites`, or `gallery_images` appear in
-`01-context/scope.md`'s MVP feature list either — they exist and work in the database and
-(per the matching `favorite`, `review`, `gallery` Java packages) in the backend, but are
-undocumented product features. Worth a `docs-code-sync` pass to decide whether to formalize
-them as in-scope features or explicitly mark them as unscoped/experimental.
-
----
-
-## Tenant isolation (cross-cutting)
-
-Every table above except `subscription_plans`, `users` (nullable), and the join/audit
-tables that hang off an already-tenant-scoped parent carries `barbershop_id` directly. There
-is no row-level security or schema-level enforcement in MySQL for this — isolation is
-entirely an application-layer guarantee via `TenantContext`
-(`00-governance/security-policy.md`). A raw SQL query without a `WHERE barbershop_id = ?`
-clause would silently return cross-tenant data; nothing in the schema itself prevents that.
-
----
-
-## Standard audit fields — what this schema actually uses
-
-Unlike the generic pattern this document used to describe (UUID PKs, `deleted_at` soft
-delete, `created_by`/`updated_by` on every table), the real schema is simpler:
-
-| Field | Present on | Notes |
-|-------|-----------|-------|
-| `created_at` | Almost every table | `TIMESTAMP DEFAULT CURRENT_TIMESTAMP` |
-| `updated_at` | Only tables with mutable state after creation (`barbershops`, `users`, `appointments`, `loyalty_cards`) | `ON UPDATE CURRENT_TIMESTAMP` |
-| `deleted_at` / soft delete | **None** — not used anywhere in this schema | Deletes are either hard `ON DELETE CASCADE` (tenant cleanup) or represented as a status change (e.g., `is_active = FALSE`, `status = 'CANCELLED'`), not a soft-delete timestamp |
-| `created_by` / `updated_by` | **None** as generic columns | Where "who did this" matters, it's a specific named FK instead (`granted_by_user_id`, `created_by_user_id`) — more precise than a generic audit column |
+`rating_avg` / `rating_count` on `barber_profile` stay because the contract exposes them; they are
+fed by reviews once that context is decided.
 
 ---
 
 ## Correlations
 
-- Domain entities and invariants these tables encode → `02-domain/entities-and-rules.md`
-- Bounded contexts these tables group into → `02-domain/domain-map.md`
-- Field-level meaning of ambiguous columns → `06-data/data-dictionary.md`
-- Current-vs-target DB engine decision → `05-architecture/overview.md` (AT-001)
-- Source file → `barbersaas-backend/barbersaas-backend/db/init.sql`
+- Conventions (UUID, cents, `CHECK`, no cross-domain FK) → `ADR-010`
+- Engine and migration tool per domain → `ADR-006`, `ADR-007`
+- Resources these tables back → `07-api/contracts/openapi/`
+- Invariants these constraints encode → `02-domain/entities-and-rules.md`
+- Field-level meaning → `06-data/data-dictionary.md`
+- Deployment of each instance → `05-architecture/deployment.md`

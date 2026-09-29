@@ -29,5 +29,6 @@ ADRs document important architectural decisions. Each file = one decision.
 | [ADR-007](records/ADR-007-migration-tool-per-domain.md) | Migration Tool per Domain: Liquibase | Accepted | 2026-09-28 |
 | [ADR-008](records/ADR-008-interface-framework.md) | Interface Framework: React (React Native for mobile) | Proposed | 2026-09-28 |
 | [ADR-009](records/ADR-009-saga-state-store.md) | Saga State Store: PostgreSQL owned by the workflow | Proposed | 2026-09-28 |
+| [ADR-010](records/ADR-010-data-conventions-per-domain.md) | Data Conventions per Domain: UUID ids, money in cents, no cross-domain FK | Accepted | 2026-09-28 |
 
 > Add rows here as you create ADRs in `records/`

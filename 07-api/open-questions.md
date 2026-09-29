@@ -161,7 +161,9 @@ responses, and uses no status code outside `guidelines.md`'s table.
 
 ## OQ-06 — Contracts use UUID and cents; `06-data/models.md` still says BIGINT and DECIMAL
 
-**Status:** open (found 2026-09-28 while writing the five domain contracts).
+**Status:** closed on the data side (2026-09-28): ADR-010 adopts UUID ids and `bigint` cents, and `06-data/models.md` was rewritten per domain with them. Still open on the contract side: `priceAtBooking` in `appointment-service.yaml` moves to `priceAtBookingCents`.
+
+**Original status:** open (found 2026-09-28 while writing the five domain contracts).
 
 **Evidence:** `06-data/models.md` ("ID strategy") documents every table as
 `BIGINT AUTO_INCREMENT PRIMARY KEY` and every monetary column (`services.price`,
@@ -281,7 +283,9 @@ declares the event.
 
 ## OQ-11 — `trialEndsAt` has no column
 
-**Status:** open (already flagged from the data side in `06-data/models.md`, under
+**Status:** closed on the data side (2026-09-28): `barbershop.trial_ends_at` is stored (`06-data/models.md` §3). Still open: update `DEC-PLAT-03` in `platform-admin-service.yaml` to read it instead of deriving it.
+
+**Original status:** open (already flagged from the data side in `06-data/models.md`, under
 `barbershops`).
 
 **Evidence:** `INV-SHOP-001` defines `trialEndsAt = createdAt + 60 days`, immutable, and FR-026's
