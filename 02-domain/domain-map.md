@@ -22,9 +22,9 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 | **Name** | Identity & Auth |
 | **Responsibility** | Registration, login, JWT issuance, tenant resolution, and password recovery for all user roles |
 | **Owner** | Carlos Leal (backend: `com.barbersaas.auth`) |
-| **Module** | `auth` (part of the modular monolith — not a separate service in MVP) |
-| **Database** | PostgreSQL — tables: `users`, `password_reset_tokens` |
-| **Ubiquitous language** | User, Role, JWT, TenantContext, PasswordResetToken |
+| **Service** | `barber-saas-identity-auth-api` (ADR-004); prototype source `com.barbersaas.auth` |
+| **Database** | `identity-auth-db` (PostgreSQL) — `app_user`, `refresh_token`, `password_reset_token` |
+| **Ubiquitous language** | User, Role, JWT, Tenant claim, JWKS, RefreshToken, PasswordResetToken |
 
 **Terms in this context:**
 
@@ -32,8 +32,8 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 |---|---|---|
 | **User** | Any authenticated person with a role and an account | Yes — in Appointment it becomes `client`, `barber` |
 | **Role** | `CLIENT`, `BARBER`, `ADMIN_BARBERSHOP`, `SUPER_ADMIN` | No — role is a platform-wide concept |
-| **TenantContext** | ThreadLocal store of `userId`, `barbershopId`, `role` for the current HTTP request | No |
-| **Token** | A signed JWT containing claims: `userId`, `role`, `barbershopId` | Yes — in Loyalty, `token` is a 6-digit password reset code |
+| **Tenant claim** | The `barbershopId` claim of the JWT; every service filters tenant data by it (the prototype kept it in a ThreadLocal `TenantContext`) | No |
+| **Token** | A JWT signed with RS256 containing claims: `sub`, `role`, `barbershopId` | Yes — in Loyalty, `token` is a 6-digit password reset code |
 
 ---
 
@@ -44,8 +44,8 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 | **Name** | Barbershop Management |
 | **Responsibility** | Lifecycle of a barbershop tenant: creation, plan assignment, trial management, status transitions (TRIAL → ACTIVE → SUSPENDED → CANCELLED), and employee (barber) administration |
 | **Owner** | Carlos Leal (backend: `com.barbersaas.barbershop`, `com.barbersaas.employee`) |
-| **Module** | `barbershop` + `employee` (modular monolith) |
-| **Database** | PostgreSQL — tables: `barbershops`, `users` (ADMIN_BARBERSHOP / BARBER roles), `barber_profiles`, `subscription_plans` |
+| **Service** | `barber-saas-barbershop-api` (ADR-004); prototype source `com.barbersaas.barbershop`, `com.barbersaas.employee` |
+| **Database** | `barbershop-db` (PostgreSQL) — `barbershop`, `service`, `barber_profile`, `barber_specialty`. Staff accounts live in identity-auth (`app_user`), plans in platform-admin; referenced by id |
 | **Ubiquitous language** | Barbershop, SubscriptionPlan, BarberProfile, BarbershopStatus, TrialPeriod |
 
 **Terms in this context:**
@@ -67,8 +67,8 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 | **Name** | Appointment |
 | **Responsibility** | The complete lifecycle of a service booking: availability calculation, anti-double-booking, state machine (PENDING → CONFIRMED → IN_PROGRESS → COMPLETED / CANCELLED / NO_SHOW), rescheduling, and walk-in client tracking |
 | **Owner** | Carlos Leal (backend: `com.barbersaas.appointment`) |
-| **Module** | `appointment` (modular monolith) |
-| **Database** | PostgreSQL — tables: `appointments`, `barber_services`, `barber_schedules`, `schedule_exceptions` |
+| **Service** | `barber-saas-appointment-api` (ADR-004); prototype source `com.barbersaas.appointment` |
+| **Database** | `appointment-db` (PostgreSQL) — `appointment`. Schedules belong to Schedule and services to Barbershop; read through their APIs (OQ-09) |
 | **Ubiquitous language** | Appointment, AppointmentStatus, Slot, AvailabilityWindow, CancellationPolicy, WalkIn |
 
 **Terms in this context:**
@@ -92,8 +92,8 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 | **Name** | Schedule |
 | **Responsibility** | Definition and management of a barber's recurring weekly working hours and one-off exceptions (days off, modified hours). Input to the availability algorithm in Appointment. |
 | **Owner** | Carlos Leal (backend: `com.barbersaas.schedule`) |
-| **Module** | `schedule` (modular monolith) |
-| **Database** | PostgreSQL — tables: `barber_schedules`, `schedule_exceptions` |
+| **Service** | `barber-saas-schedule-api` (ADR-004); prototype source `com.barbersaas.schedule` |
+| **Database** | `schedule-db` (PostgreSQL) — `barber_schedule`, `schedule_exception` |
 | **Ubiquitous language** | WeeklySchedule, DayOfWeek, TimeSlot, ScheduleException, DayOff |
 
 **Terms in this context:**
@@ -112,8 +112,8 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 | **Name** | Loyalty & Rewards |
 | **Responsibility** | Sticker-based loyalty card per client per barbershop, reward redemption, automatic coupon generation and application on the client's next booking |
 | **Owner** | Carlos Leal (backend: `com.barbersaas.loyalty`) |
-| **Module** | `loyalty` (modular monolith) |
-| **Database** | PostgreSQL — tables: `loyalty_cards`, `loyalty_rewards_config`, `loyalty_transactions`, `reward_coupons` |
+| **Service** | `barber-saas-loyalty-api` (ADR-004); prototype source `com.barbersaas.loyalty` |
+| **Database** | `loyalty-db` (PostgreSQL) — `loyalty_card`, `loyalty_rewards_config`, `loyalty_transaction`, `reward_coupon` |
 | **Ubiquitous language** | LoyaltyCard, Sticker, Reward, Redemption, RewardCoupon, CouponStatus |
 
 **Terms in this context:**
@@ -135,8 +135,8 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 | **Name** | Notifications |
 | **Responsibility** | Delivery of in-app, push (FCM), and email notifications triggered by domain events. Persists all notifications to DB regardless of delivery outcome (graceful degradation). |
 | **Owner** | Carlos Leal (backend: `com.barbersaas.notification`) |
-| **Module** | `notification` (modular monolith) |
-| **Database** | PostgreSQL — tables: `notifications`, `device_tokens` |
+| **Service** | `barber-saas-notifications-api` (ADR-004); prototype source `com.barbersaas.notification` |
+| **Database** | `notifications-db` (MongoDB, ADR-006) — collections `notification`, `device_token` |
 | **Ubiquitous language** | Notification, NotificationType, DeviceToken, PushDelivery, EmailDelivery |
 
 **Terms in this context:**
@@ -156,8 +156,8 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 | **Name** | Finance & Inventory |
 | **Responsibility** | Manual recording of income and expenses per barbershop, product stock management, and restock alerts |
 | **Owner** | Carlos Leal (backend: `com.barbersaas.finance`, `com.barbersaas.inventory`) |
-| **Module** | `finance` + `inventory` (modular monolith) |
-| **Database** | PostgreSQL — tables: `finance_records`, `inventory_products`, `inventory_movements` |
+| **Service** | `barber-saas-finance-inventory-api` (ADR-004); prototype source `com.barbersaas.finance`, `com.barbersaas.inventory` |
+| **Database** | `finance-inventory-db` (PostgreSQL) — `finance_record`, `inventory_product`, `inventory_movement` |
 | **Ubiquitous language** | FinanceRecord, RecordType (INCOME/EXPENSE), InventoryProduct, StockAlert, Movement |
 
 **Terms in this context:**
@@ -178,8 +178,8 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 | **Name** | Platform Administration |
 | **Responsibility** | Cross-tenant oversight: creating and managing barbershops, defining subscription plans, monitoring platform-wide metrics (total barbershops, clients, revenue), and managing trial/billing states |
 | **Owner** | Carlos Leal (backend: `com.barbersaas.barbershop.SuperAdminBarbershopController`, `com.barbersaas.plan`) |
-| **Module** | Part of `barbershop` + `plan` (modular monolith, accessed via `/api/super-admin/**`) |
-| **Database** | PostgreSQL — reads across all tenant tables; owns `subscription_plans` |
+| **Service** | `barber-saas-platform-admin-api` (ADR-004); prototype source `SuperAdminBarbershopController`, `com.barbersaas.plan` |
+| **Database** | `platform-admin-db` (PostgreSQL) — owns `subscription_plan`; reads and changes barbershops only through Barbershop's API (OQ-10), never another database |
 | **Ubiquitous language** | PlatformDashboard, SubscriptionPlan, BarbershopStatus, TrialExpiry |
 
 **Terms in this context:**
@@ -192,32 +192,52 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 
 ---
 
+### Prototype entities not yet in the MVP scope — proposed placement
+
+The prototype has four tables with working code (`reviews`, `promotions`,
+`client_favorites`, `gallery_images`, see the prototype schema in the history of
+`06-data/models.md`) that are not in `01-context/scope.md` and had no context here. None is
+ported to a `-db` until a user story brings it into scope (`00-governance/definition-of-ready.md`).
+When that happens, this is where each one belongs:
+
+| Entity | Proposed context | Why | Ubiquitous language |
+|---|---|---|---|
+| **Review** | Barbershop Management | A client rates a barber and the barbershop after a `COMPLETED` appointment; it feeds `barber_profile.rating_avg` / `rating_count`, which Barbershop already exposes. It learns about completion from `AppointmentCompleted` | Review, Rating (1–5) |
+| **Promotion** | Barbershop Management | A discount on the barbershop's own catalog (`PERCENTAGE`, `FIXED_AMOUNT`, `TWO_FOR_ONE`), valid for a date range; the price a booking snapshots comes from Barbershop | Promotion, DiscountType, ValidityPeriod |
+| **ClientFavorite** | Barbershop Management | A client's bookmark of a barbershop in the discovery catalog (`DEC-SHOP-02`) | Favorite |
+| **GalleryImage** | Barbershop Management | The barbershop's and its barbers' showcase photos, shown with the public profile | GalleryImage, Caption |
+
+All four are **supporting** subdomains (§4): they help a barbershop sell, but no core rule
+(booking, loyalty) depends on them. Placing them in Barbershop keeps them next to the data
+they decorate and adds no new service. This placement is a proposal for the team to confirm
+when the first of these stories is refined.
+
 ## 3. Context Map
 
 ```
 ┌─────────────────────────┐
 │   Identity & Auth       │  ← Upstream to ALL contexts
-│   /api/auth/**          │    (JWT + TenantContext resolve
-│   Role, JWT, Tenant     │     userId, barbershopId, role)
+│   /api/v1/auth          │    (JWT RS256 claims carry
+│   Role, JWT, Tenant     │     sub, barbershopId, role)   
 └────────────┬────────────┘
              │ U → D (JWT claims)
              ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │                    Barbershop Management                           │
-│   /api/admin/** · /api/super-admin/**                              │
+│   /api/v1/barbershops · /services · /barbers                       │
 │   Barbershop, BarberProfile, SubscriptionPlan, BarbershopStatus    │
 └──────┬──────────────────────────┬──────────────────────────────────┘
-       │ U → D (barbershopId FK)  │ U → D (barberProfileId FK)
+       │ U → D (barberProfileId)  │ U → D (barberId, serviceId)
        ▼                          ▼
 ┌──────────────────┐    ┌──────────────────────────┐
 │    Schedule      │    │       Appointment        │
 │  barber_schedules│───▶│  availability algorithm  │
-│  exceptions      │ SK │  state machine (6 states)│
+│  exceptions      │API │  state machine (6 states)│
 └──────────────────┘    │  walk-in support         │
                         └──────────┬───────────────┘
-                                   │ U → D (planned — grantSticker() is a manual
-                                   │ staff action today, not auto-triggered; see
-                                   │ relationship table below)
+                                   │ U → D (event AppointmentCompleted
+                                   │ through the outbox; see relationship
+                                   │ table below)
                         ┌──────────▼───────────────┐
                         │    Loyalty & Rewards      │
                         │  stickers, coupons        │
@@ -238,18 +258,23 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 
 ### Relationship table
 
-| Context A | Relation | Context B | Channel | Contract |
-|---|---|---|---|---|
-| Identity & Auth | U → D | All other contexts | JWT (HTTP header) | `TenantContext` (ThreadLocal) |
-| Barbershop Management | U → D | Appointment | `barbershopId` FK in `appointments` | JPA entity reference |
-| Barbershop Management | U → D | Schedule | `barberProfileId` FK in `barber_schedules` | JPA entity reference |
-| Schedule | Shared Kernel | Appointment | Shared `barber_schedules` / `schedule_exceptions` tables | JPA — same PostgreSQL schema |
-| Appointment | U → D | Loyalty & Rewards | `AppointmentService.complete()` calls `LoyaltyService.grantStickerForCompletedAppointment()` in the same transaction — grants a sticker automatically if the barbershop has an active loyalty program, no-ops otherwise (does not fail the completion). See `02-domain/domain-events.md` → `AppointmentCompleted` | In-process Java method call |
-| Loyalty & Rewards | U → D | Appointment | `RewardCoupon` check in `AppointmentService.create()` — confirmed in code | In-process Java method call |
-| Appointment | U → D | Notifications | `NotificationService.notify()` after `create()`, `confirm()`, `cancel()`, and the daily reminder job — confirmed in code. **Not** called after `complete()` or the NO_SHOW auto-marking job | In-process Java method call |
-| Loyalty & Rewards | U → D | Notifications | `LoyaltyService.grantSticker()` and `.redeemReward()` call `NotificationService.notify()` (`Notification.Type.LOYALTY`) after persisting the `LoyaltyTransaction` | In-process Java method call |
-| All contexts | U → D | Finance & Inventory | Manual registration by admin; appointment revenue logged | HTTP REST (admin screens) |
-| All contexts | U → D | Platform Administration | Cross-tenant reads via Super Admin dashboard | HTTP REST (`/api/super-admin/**`) |
+> Since ADR-004 every context is its own service and database, so no relation is an
+> in-process call or a shared table anymore. The prototype's mechanism is kept in the last
+> column because it is the behaviour being ported.
+
+| Context A | Relation | Context B | Channel (target) | Contract | Prototype mechanism |
+|---|---|---|---|---|---|
+| Identity & Auth | U → D | All other contexts | JWT RS256 in `Authorization`, validated by each service with the JWKS | `07-api/authentication.md` (claims `sub`, `role`, `barbershopId`) | `TenantContext` (ThreadLocal) |
+| Barbershop Management | U → D | Appointment | `barberId` / `serviceId` as UUIDs; price and duration read from Barbershop's API at booking | `barbershop-service.yaml` | JPA FK |
+| Barbershop Management | U → D | Schedule | `barberProfileId` as UUID, no FK | `barbershop-service.yaml` | JPA FK |
+| Schedule | U → D | Appointment | Appointment asks Schedule whether a slot is inside working hours; Schedule learns bookings from Appointment's events (direction still open, OQ-09) | `schedule-service.yaml`, `appointment-service.yaml` | Shared Kernel on the same tables |
+| Appointment | U → D | Loyalty & Rewards | Event `AppointmentCompleted` through Appointment's outbox; Loyalty grants the sticker once per appointment | `02-domain/domain-events.md`, `uq_loyalty_transaction_sticker_per_appointment` | In-process `grantStickerForCompletedAppointment()` |
+| Loyalty & Rewards | U → D | Appointment | Appointment checks and consumes an `ACTIVE` coupon through Loyalty's API (`/api/v1/loyalty/coupons/{id}/use`) | `loyalty-service.yaml` | In-process `RewardCoupon` check |
+| Appointment | U → D | Notifications | Events `AppointmentConfirmed`, `AppointmentCancelled`, `AppointmentCompleted`; reminder produced by the worker | `notification-service.yaml` (created from events) | In-process `NotificationService.notify()` |
+| Loyalty & Rewards | U → D | Notifications | Events `StickerGranted`, `RewardRedeemed` | `02-domain/domain-events.md` | In-process `notify()` |
+| Identity & Auth | U → D | Notifications | Event `PasswordResetRequested` (e-mail with the code) | `auth-service.yaml` | In-process mail call |
+| Barbershop Management | U → D | Platform Administration | Platform admin changes a barbershop's status and plan through Barbershop's API with a service token (OQ-10) | `platform-admin-service.yaml` | Same tables |
+| All contexts | U → D | Finance & Inventory | Manual registration by the admin; appointment revenue linked by `relatedAppointmentId` | `finance-inventory-service.yaml` | Same tables |
 
 ---
 
@@ -280,9 +305,9 @@ BarberSaaS is a multi-tenant SaaS platform that digitizes the full operational c
 
 | Decision | Discarded alternative | Reason |
 |---|---|---|
-| Keep Schedule as a Shared Kernel with Appointment (same DB tables) | Extract Schedule as a separate microservice | At current scale, the shared table is simpler. No independent scaling need identified yet. Trigger for extraction: >10,000 barbershops. |
-| Loyalty hooks directly into Appointment via in-process call | Event-driven (publish `AppointmentCompleted` event, Loyalty subscribes) | No message broker in MVP. In-process call is synchronous and easier to reason about. Event-driven will be introduced when Notifications moves to its own service. |
-| Single PostgreSQL schema for all bounded contexts | One database per bounded context | Operational simplicity for MVP. The multi-tenancy discriminator (`barbershop_id`) provides logical isolation. Physical separation is a future ADR trigger. |
+| Schedule is its own service and database, not a Shared Kernel with Appointment | Keep the shared tables (prototype) | ADR-004 and norm 7.3: no service reads another domain's database. How availability learns about bookings is OQ-09 |
+| Loyalty reacts to `AppointmentCompleted` as an event | In-process call inside the booking transaction (prototype) | Two databases cannot share a transaction (norm 7.5); the outbox plus a unique sticker per appointment make delivery safe to repeat |
+| One database per bounded context (ADR-004, ADR-006) | Single PostgreSQL schema with `barbershop_id` (prototype, ADR-002 — superseded) | Course requirement and norm 7.1; tenant isolation now repeated in each service (`07-api/authentication.md`) |
 
 ---
 

@@ -64,7 +64,7 @@ feature deploys are frozen until the next month and stability is prioritized.
 
 > The scenarios below (Kubernetes-style horizontal auto-scaling) do **not** match the
 > actual deployment target. BarberSaaS deploys as a single Spring Boot JAR to **Railway**
-> (per `01-context/overview_en.md` → Technology stack), not Kubernetes. Rewritten to
+> (per `01-context/overview.md` → Technology stack), not Kubernetes. Rewritten to
 > reflect that target instead of a generic microservices assumption.
 
 | Scenario | Expected behavior |
@@ -105,7 +105,7 @@ Tools: SAST (SonarQube/Snyk), dependency scanning, DAST in staging.
 
 ### Regulatory compliance
 - **Habeas Data** (Ley 1581 de 2012, Colombia) applies — BarberSaaS's target market is
-  exclusively Colombian (per `01-context/overview_en.md`). Whether client data must be
+  exclusively Colombian (per `01-context/overview.md`). Whether client data must be
   physically stored within Colombia is an explicit **open legal question**, owned by
   Legal, to be resolved before production — see `01-context/scope.md` → Constraints
 - GDPR and PCI-DSS are not currently applicable: no EU user base is targeted, and no card
@@ -148,7 +148,7 @@ implements it as of this review.
 ## NFR-007: Portability
 
 - The backend is packaged as a Docker image (real: `Dockerfile` + `docker-compose.yml` exist in `barbersaas-backend/`) and fronted by Nginx locally
-- **Kubernetes is not the target** — deployment is planned on Railway (`01-context/overview_en.md`), which runs the container directly. Remove/ignore any K8s-specific assumption until an actual K8s deployment is scoped
+- **Kubernetes is not the target** — deployment is planned on Railway (`01-context/overview.md`), which runs the container directly. Remove/ignore any K8s-specific assumption until an actual K8s deployment is scoped
 - No service depends on the host operating system (standard for a containerized JVM app)
 - Environment variables are the source of environment-specific configuration — confirmed in `application.yml` (`${JWT_SECRET:...}`, `${DB_URL:...}`-style placeholders)
 

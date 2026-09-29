@@ -30,7 +30,7 @@
 | **Loyalty Card** | A client's accumulated sticker count and redemption history at one specific barbershop. | One card per client per barbershop |
 | **Sticker** | A loyalty point granted by a barber or admin after a completed service. | |
 | **Reward / Reward Coupon** | The benefit a client earns after accumulating the stickers required by their barbershop. Redemption issues an `ACTIVE` Reward Coupon, applied as a 100% discount on the client's next booking. | |
-| **Subscription Plan** | One of three paid tiers a barbershop is on — **Starter** (up to 2 barbers), **Profesional** (up to 5), **Premium** (unlimited) — differing in monthly COP price and max barbers. | See `01-context/overview_en.md` → Monetization model |
+| **Subscription Plan** | One of three paid tiers a barbershop is on — **Starter** (up to 2 barbers), **Profesional** (up to 5), **Premium** (unlimited) — differing in monthly COP price and max barbers. | See `01-context/overview.md` → Monetization model |
 | **Trial** | The 60-day free period a barbershop gets at self-registration before it must convert to a paid plan. | Status `TRIAL` in the barbershop lifecycle (`TRIAL` → `ACTIVE` → `SUSPENDED` → `CANCELLED`) |
 
 ---
