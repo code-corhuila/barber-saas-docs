@@ -27,12 +27,38 @@ depends on (norm 5.1).
 
 ---
 
+## The eight domain services
+
+The folder of each service is named after its domain, exactly as in its repositories
+(`barber-saas-<domain>-api`). State on 2026-09-30:
+
+| Domain | Repositories | Contract (`07-api/contracts/openapi/`) | Data model | Docs folder `09-microservices/services/<domain>/` |
+|---|---|---|---|---|
+| identity-auth | `-db`, `-api`, `-app` | `auth-service.yaml` ✅ | `06-data/models.md` §2 ✅ | ❌ not created |
+| barbershop | `-db`, `-api`, `-app` | `barbershop-service.yaml` ✅ | §3 ✅ | ❌ not created |
+| schedule | `-db`, `-api`, `-app` | `schedule-service.yaml` ✅ | §4 ✅ | ❌ not created |
+| appointment | `-db`, `-api`, `-app` | `appointment-service.yaml` ✅ | §5 ✅ | ❌ not created |
+| loyalty | `-db`, `-api`, `-app` | `loyalty-service.yaml` ✅ | §6 ✅ | ❌ not created |
+| notifications | `-db`, `-api`, `-app` | `notification-service.yaml` ✅ | §7 (MongoDB) ✅ | ❌ — `services/notification/` is the prototype's ADR-003 extraction (superseded), not this service |
+| finance-inventory | `-db`, `-api`, `-app` | `finance-inventory-service.yaml` ✅ | §8 ✅ | ❌ not created |
+| platform-admin | `-db`, `-api`, `-app` | `platform-admin-service.yaml` ✅ | §9 ✅ | ❌ not created |
+
+`services/02-auth-service/` is the governance framework's worked example (it says so in its
+header), not identity-auth. Until a domain gets its folder, its contract and its section of
+`06-data/models.md` are its documentation; the folder becomes mandatory with the first story that
+implements the domain (README) and before its first migration (`data-model.md`).
+
+The cross-cutting repositories (`-api-gateway`, `-workflow`, `-worker`, `-infra`, `-front`) are
+documented in `05-architecture/overview.md` §4.2 and `05-architecture/deployment.md`, not here.
+
+---
+
 ## Required structure for each service
 
-Each microservice lives in `09-microservices/services/NN-service-name/` and MUST have:
+Each domain service lives in `09-microservices/services/<domain>/` and MUST have:
 
 ```
-09-microservices/services/NN-service-name/
+09-microservices/services/<domain>/
 ├── README.md         ⭐ REQUIRED from Sprint 1
 ├── data-model.md     ⭐ REQUIRED before creating migrations
 ├── events.md         ⭐ REQUIRED if the service emits/consumes events
@@ -144,11 +170,17 @@ Use the template: `07-api/contracts/openapi/_template-service.yaml`
 
 ## How to add a new microservice
 
+The same steps apply when one of the eight domains gets its docs folder for the first time.
+
 1. If it is not one of the 29 mandatory repositories, record an ADR **before** creating it (norm 4.2.1)
-2. Copy `09-microservices/_template/service/` → `09-microservices/services/NN-name/`
-3. Update `09-microservices/service-catalog.md` with the new service's entry
-4. Update `09-microservices/dependency-map.md` (or create it if it doesn't exist)
-5. Copy `07-api/contracts/openapi/_template-service.yaml` → `07-api/contracts/openapi/service-name.yaml`
+2. Copy `09-microservices/_template/service/` → `09-microservices/services/<domain>/`
+3. Update `09-microservices/service-catalog.md` with the service's entry — the catalog still
+   describes the prototype's modules (`05-architecture/overview.md`, AT-006), so the first domain to
+   do this also replaces the monolith description
+4. Update `09-microservices/dependency-map.md` (it does not exist yet; until then the dependencies
+   are in `05-architecture/overview.md` §3 and in the index of `07-api/README.md`)
+5. Copy `07-api/contracts/openapi/_template-service.yaml` → `07-api/contracts/openapi/<domain>-service.yaml`
+   and register it in the index of `07-api/README.md`
 6. Create a PR with at least the README.md and the sketched API contract
 
 ---
