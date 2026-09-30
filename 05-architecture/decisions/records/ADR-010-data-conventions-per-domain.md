@@ -81,3 +81,9 @@ references that used to be joins become calls to another service.
 
 - Course norm 5.2.5, 5.3.5, 5.3.8, 5.3.11, 7.4, annexes A and B
 - Related to: ADR-004, ADR-006, ADR-007
+- Identifier in the contracts: `07-api/contracts/openapi/_shared.yaml#/components/schemas/UUID`
+- How the prototype's `BIGINT` ids and `DECIMAL` money are ported: `06-data/migration-strategy.md` § 3
+- Tables under these conventions: `06-data/models.md`. The prototype schema they replace was not
+  copied to `06-data/prototype-schema.md` as the consequences above anticipated: it is kept
+  unchanged in the history, at `8df7fec:06-data/models.md`, linked from the head of `models.md`
+  together with the status of every gap it flagged
