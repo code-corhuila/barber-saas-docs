@@ -92,7 +92,7 @@ list of files it changes and the tracker finding or FR it closes. It enters thro
 | | Definition of Ready (DoR) | Definition of Done (DoD) |
 |-|--------------------------|--------------------------|
 | **When** | Before writing the SPEC | After the PR is merged and promoted |
-| **Who verifies** | Team in refinement; Daniel approves the SPEC (gate G1) | Team in review; `review-gate` rubric on the HANDOFF report (gate G4) |
+| **Who verifies** | Team in refinement; the story owner approves the SPEC (gate G1) | Team in review; `review-gate` rubric on the HANDOFF report (gate G4) |
 | **Purpose** | The team can start without guessing | The increment is in the repository, traced and shippable |
 
 ---

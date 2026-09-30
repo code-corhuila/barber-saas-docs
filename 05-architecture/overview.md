@@ -122,7 +122,7 @@ graph TB
 | 5 | Loyalty (core) | `loyalty-{db,api,app}` | `loyalty-api:8080` | PostgreSQL | `/api/v1/loyalty` | `loyalty-service.yaml` |
 | 6 | Notifications | `notifications-{db,api,app}` | `notifications-api:8080` | MongoDB | `/api/v1/notifications`, `/api/v1/device-tokens` | `notification-service.yaml` |
 | 7 | Finance & Inventory | `finance-inventory-{db,api,app}` | `finance-inventory-api:8080` | PostgreSQL | `/api/v1/finance`, `/api/v1/inventory` | `finance-inventory-service.yaml` |
-| 8 | Platform Admin | `platform-admin-{db,api}` | `platform-admin-api:8080` | PostgreSQL | `/api/v1/plans`, `/api/v1/platform` | `platform-admin-service.yaml` |
+| 8 | Platform Admin | `platform-admin-{db,api,app}` | `platform-admin-api:8080` | PostgreSQL | `/api/v1/plans`, `/api/v1/platform` | `platform-admin-service.yaml` |
 
 All repositories carry the `barber-saas-` prefix. Contracts live in
 `07-api/contracts/openapi/`; every path is served under `/api/v1` through the gateway.
@@ -210,15 +210,16 @@ e-mails, notifications) is Spanish (Colombia).
 
 ## 8. Registered architectural technical debt
 
-| ID | Description | Impact | Priority |
-|---|---|---|---|
-| AT-001 | `06-data/models.md` still describes the prototype's single MySQL schema with BIGINT ids; it must be split per `-db` with UUID ids | High | P1 |
-| AT-002 | `07-api/authentication.md` still describes HS512; the norm and this document require RS256 with a public key | High | P1 |
-| AT-003 | Contracts use inconsistent `servers` and paths (`/appointments`, `localhost:8081`, `/api/notifications`) instead of `/api/v1` behind the gateway | Medium | P1 |
-| AT-004 | Message transport for events (broker vs. worker-polled outbox) is not decided; needs its own ADR | Medium | P2 |
-| AT-005 | ADR-008 (interface framework) and ADR-009 (saga store) await the teacher's answer | Medium | P2 |
-| AT-006 | `09-microservices/service-catalog.md` still documents the prototype's modules | Medium | P2 |
-| AT-007 | The 29 repositories hold only README and CODEOWNERS; no service is implemented yet | High | P1 |
+| ID | Description | Impact | Priority | Status |
+|---|---|---|---|---|
+| AT-001 | `06-data/models.md` described the prototype's single MySQL schema with BIGINT ids; it had to be split per `-db` with UUID ids | High | P1 | Closed — #38 (ADR-010) |
+| AT-002 | `07-api/authentication.md` described HS512; the norm and this document require RS256 with a public key | High | P1 | Closed — #39 (OQ-04) |
+| AT-003 | Contracts used inconsistent `servers` and paths (`/appointments`, `localhost:8081`, `/api/notifications`) instead of `/api/v1` behind the gateway | Medium | P1 | Closed — #39 (OQ-05); every `servers` is `http://localhost:8000` |
+| AT-004 | Message transport for events (broker vs. worker-polled outbox) is not decided; needs its own ADR | Medium | P2 | Open |
+| AT-005 | ADR-008 (interface framework) and ADR-009 (saga store) await the teacher's answer | Medium | P2 | Open |
+| AT-006 | `09-microservices/service-catalog.md` still documents the prototype's modules | Medium | P2 | Open |
+| AT-007 | The 29 repositories hold only README and CODEOWNERS on `develop`, `qa` and `main`; no service is implemented yet (checked 2026-09-30) | High | P1 | Open |
+| AT-008 | The seeded `README.md` of all 29 repositories says "Part of the **LMS Library** distributed system" and links `library-docs`, not BarberSaaS and `barber-saas-docs` (rule P2) | Medium | P1 | Open — fix through a `chore/` PR in each repository |
 
 ---
 
@@ -226,8 +227,8 @@ e-mails, notifications) is Spanish (Colombia).
 
 | Step | Architectural change | Motivation |
 |---|---|---|
-| 1 | Rewrite `06-data` per domain with UUID ids and cents (AT-001) | 07↔06 consistency |
-| 2 | Align auth, contracts and servers to the norm (AT-002, AT-003) | 07↔05 consistency |
+| 1 | ~~Rewrite `06-data` per domain with UUID ids and cents (AT-001)~~ — done | 07↔06 consistency |
+| 2 | ~~Align auth, contracts and servers to the norm (AT-002, AT-003)~~ — done | 07↔05 consistency |
 | 3 | Scaffold `-infra`, `-api-gateway` and the first vertical slice: identity-auth, barbershop, schedule, appointment | Appointment depends on barbershop and schedule |
 | 4 | Loyalty, notifications and the booking saga in `-workflow` | Cross-domain flows |
 | 5 | Finance & inventory, platform admin, worker jobs | Remaining domains |

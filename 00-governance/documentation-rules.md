@@ -24,22 +24,40 @@ The DoD requires it.
 | Branch names | English |
 | Markdown documentation | English |
 | OpenAPI contracts (descriptions) | English |
-| Error messages returned to frontend | English (or localized) |
+| Pull Requests, issues, board items | English |
+| Error `message` returned by an API | English — as in every example of `_shared.yaml` |
+| Text shown to end users (app screens, push notifications, e-mails) | Spanish (Colombia) — localized at the edge (ADR-001, `05-architecture/overview.md` P6) |
 | Internal system logs | English |
 
-> **Rule:** Once the language for each category is chosen, it is binding for the entire project.
-> Mixing languages in the same category is grounds for PR rejection.
+> **Rule:** the languages above are fixed by ADR-001 and bind the entire project. Mixing languages
+> in the same category is grounds for PR rejection. Conversation inside the team may be in Spanish;
+> nothing that lands in a repository or on GitHub is.
 
 ---
 
 ## File structure
 
-```
-Each section has its README.md that explains the folder's purpose.
-Content documents use kebab-case.md (e.g.: domain-map.md, risk-register.md).
-Templates are prefixed with _ to appear first (e.g.: _template-hu.md, _template-adr.md).
-ADRs are numbered sequentially: ADR-001-short-title.md.
-```
+The repository is organized in numbered sections, in the order of the framework blocks (see
+[README](./README.md#governance-framework-pillars)):
+
+| Block | Sections |
+|---|---|
+| Governance (wraps all) | `00-governance` |
+| Discovery | `01-context`, `02-domain`, `03-product`, `04-requirements` |
+| Design | `05-architecture`, `06-data`, `07-api` |
+| Detail | `08-diagrams`, `09-microservices`, `12-ux-ui`; `16-bpmn` is expected and does not exist yet |
+| Implementation & operations | `10-devops`, `11-quality`, `13-operations`, `14-training`, `15-project-control` |
+| Retired content | `99-archive` — kept for history, never cited as current |
+
+- Each section has a `README.md` that explains its purpose.
+- Content documents use `kebab-case.md` (e.g. `domain-map.md`, `data-dictionary.md`).
+- Templates are prefixed with `_` to appear first (e.g. `_template-hu.md`, `_template-adr.md`,
+  `_template-service.yaml`).
+- ADRs are numbered sequentially and never renumbered: `ADR-NNN-short-title.md`, registered in
+  `05-architecture/decisions/README.md`.
+- Per-domain material uses the domain names of the repositories — `identity-auth`, `barbershop`,
+  `appointment`, `schedule`, `loyalty`, `notifications`, `finance-inventory`, `platform-admin` —
+  never the prototype's module names.
 
 ---
 
@@ -51,8 +69,11 @@ ADRs are numbered sequentially: ADR-001-short-title.md.
 |------|-------|
 | Non-obvious architectural decisions | `05-architecture/decisions/records/ADR-NNN.md` |
 | Business rules and domain invariants | `02-domain/entities-and-rules.md` |
-| API contracts for each service | `07-api/contracts/openapi/[service].yaml` |
-| Data model changes | `06-data/models.md` |
+| API contracts for each domain | One file per domain in `07-api/contracts/openapi/` (e.g. `appointment-service.yaml`; identity-auth is `auth-service.yaml`), reusing `_shared.yaml` — index in `07-api/README.md` |
+| Open questions a contract or model cannot settle yet | `07-api/open-questions.md` (`OQ-NN`) |
+| Data model changes | `06-data/models.md` (tables per `-db`) and `06-data/data-dictionary.md` (meaning of fields) |
+| Deployment and environments | `05-architecture/deployment.md`, `10-devops/environments.md` |
+| Architectural debt | Debt table of `05-architecture/overview.md` (`AT-NNN`) |
 | Operational procedures | `13-operations/` |
 | Identified risks | `15-project-control/risks.md` |
 
@@ -100,16 +121,20 @@ every repository added beyond the mandatory ones — before it is created (norm 
 
 ## Owners per section
 
-| Section | Owner | Review frequency |
-|---------|-------|-----------------|
-| `00-governance/` | Tech Lead | Start of each sprint |
-| `02-domain/` | Tech Lead + PO | When the domain changes |
-| `04-requirements/` | Product Owner | Each sprint |
-| `05-architecture/` | Tech Lead | Each design decision |
-| `07-api/contracts/` | Service-owning developer | Each API change |
-| `09-microservices/` | Service-owning developer | Each release |
-| `13-operations/` | DevOps / On-call | After each incident |
-| `15-project-control/` | Tech Lead | Weekly review |
+| Section | Owner (role) | Who today | Review frequency |
+|---------|-------|-----------|-----------------|
+| `00-governance/` | Tech Lead | Carlos Leal | Start of each sprint |
+| `02-domain/` | Tech Lead + PO | Carlos Leal | When the domain changes |
+| `04-requirements/` | Product Owner | Carlos Leal (the whole team acts as PO, `01-context/overview.md`) | Each sprint |
+| `05-architecture/` | Tech Lead | Carlos Leal; ADRs are signed by the whole team | Each design decision |
+| `06-data/`, `07-api/contracts/` | Developer who owns the domain | Not assigned per domain yet — assign on the board with the first story of each domain | Each schema or API change |
+| `09-microservices/` | Developer who owns the domain | Same as above | Each release |
+| `13-operations/` | DevOps / On-call | Not assigned — no environment runs yet | After each incident |
+| `15-project-control/` | Tech Lead | Carlos Leal | Weekly review |
+
+Team: Carlos Leal (Tech Lead / Lead Developer / PO), Daniel Cerquera, Juan Pablo Borrero,
+Carolay Arraut (`00-governance/agile-conventions.md`). Any member may change any section through a
+PR; the owner is who answers for its coherence (rule P2).
 
 ---
 

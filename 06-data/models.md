@@ -11,9 +11,22 @@
 > tables and foreign keys go in separate folders (annex A).
 
 > **History.** Until 2026-09-28 this file transcribed the prototype's `db/init.sql` (MySQL 8,
-> one shared schema, `BIGINT` ids, `DECIMAL` money). That transcription is still available in
-> the git history of this file and in `code-corhuila/barber-saas`. The business rules it
-> surfaced are carried over below; its types are not.
+> one shared schema, `BIGINT` ids, `DECIMAL` money). That transcription is kept, unchanged, at
+> [`8df7fec:06-data/models.md`](https://github.com/code-corhuila/barber-saas-docs/blob/8df7fecbb36c64e67d9d583b5d98298941c0869d/06-data/models.md).
+> The business rules it surfaced are carried over below; its types are not.
+
+**Gaps the transcription flagged, and where each one stands:**
+
+| Gap in the prototype schema | Resolution |
+|---|---|
+| `appointments.client_id BIGINT NOT NULL` blocked walk-ins (F-13) | Resolved — `client_id` is nullable, only staff may leave it empty (§5), as `appointment-service.yaml` declares |
+| No `trial_ends_at` column although INV-SHOP-001 needs it (FR-026) | Resolved — stored and indexed (§3, OQ-11) |
+| No `CHECK (amount > 0)`: FR-017 enforced only in code | Resolved — `chk_finance_record_amount` (§8) |
+| Double booking prevented only by a lock in code | Resolved — `ex_appointment_no_double_booking` (§5) |
+| `BIGINT AUTO_INCREMENT` ids vs. UUID in the contracts | Resolved — UUID everywhere (ADR-010) |
+| `barber_specialties`, `rating_avg`/`rating_count` absent from `02-domain` | Kept, because the contract exposes them (§3, §11) |
+| `reviews`, `promotions`, `client_favorites`, `gallery_images` not in any bounded context | Not carried over until a user story brings them in (§11) |
+| Seeded plans Basico/Pro/Premium vs. Starter/Profesional/Premium in `01-context` | **Open** — the team must confirm which is current (§9) |
 
 ---
 
@@ -287,8 +300,8 @@ CREATE INDEX idx_appointment_status ON appointment (status);
   the same barber cannot overlap in time. The prototype relied on a pessimistic lock in code;
   the lock remains useful to return a clean `422`, but the constraint is the guarantee.
 - `price_at_booking_cents` is computed by the service from `service.price_cents` at booking
-  time and never changes (INV-APPT-002). The contract still names it `priceAtBooking` as a
-  `double`; it moves to `priceAtBookingCents` in the 07 alignment.
+  time and never changes (INV-APPT-002). The contract exposes it as `priceAtBookingCents` and
+  rejects it in a booking request (`appointment-service.yaml`, `DEC-APPT-02`).
 
 ---
 
@@ -398,8 +411,8 @@ Index: `uq_device_token_token` unique on `token` (re-registering the same device
 
 - The prototype had no `device_tokens` table in `init.sql` (it existed only as a JPA entity);
   here it is a declared collection backing `POST /device-tokens`.
-- The `type` values are the prototype's four. The contract still describes `type` as free text;
-  it is fixed to this enum in the 07 alignment.
+- The `type` values are the prototype's four, identical to the `NotificationType` enum of
+  `notification-service.yaml`.
 
 ---
 

@@ -4,8 +4,9 @@
 > environment. Rules come from the course norm 2026-B (5.6, 5.9, 6.2, 7) and its annexes F
 > (api-gateway) and G (infra).
 
-> **Current state (2026-09-28):** the 29 repositories hold only README and CODEOWNERS.
-> Nothing in this document is deployed yet; it is the target every repository must meet.
+> **Current state (re-checked 2026-09-30):** the 29 repositories hold only `README.md` and
+> `.github/CODEOWNERS` on `develop`, `qa` and `main`. Nothing in this document is deployed yet; it
+> is the target every repository must meet. What is missing, file by file, is listed in §10.
 
 ---
 
@@ -178,7 +179,30 @@ identity-auth, barbershop, schedule, appointment and the gateway).
 
 ---
 
-## 10. Verification checklist
+## 10. Pending — not implemented yet
+
+Every artifact this document relies on, and where it has to appear. None exists today in any
+branch of the repositories (checked with `git ls-files` on `develop`, `qa` and `main`,
+2026-09-30).
+
+| Artifact | Repository | Needed by |
+|---|---|---|
+| `compose.yml` with `include` of every repository, `platform` network | `barber-saas-infra` | §1, §8 |
+| `scripts/up.sh`, `scripts/dev-keys.sh`, `scripts/dev-token.sh` | `barber-saas-infra` | §6, §8 |
+| `env/.env.develop.example`, `env/.env.qa.example`, `env/.env.main.example` | `barber-saas-infra` | §4, §6 |
+| `observability/otel-collector.yaml`, `observability/prometheus.yml`, Grafana | `barber-saas-infra` | §7 |
+| `deploy/compose.yml` + NGINX config with one routes file per domain | `barber-saas-api-gateway` | §2, §3 |
+| `deploy/compose.yml` with the instance and its `<domain>-db-migrate` runner; Liquibase changelog | each `barber-saas-<domain>-db` (8) | §5 |
+| `Dockerfile` + `deploy/compose.yml` (`expose: 8080`, memory limit, `GET /health`) | each `barber-saas-<domain>-api` (8), `-workflow`, `-worker` | §3, §7, §8 |
+| `.gitignore` covering `.env`, `keys/`, `*.pem` | every runnable repository | §6 |
+| Hosting for `qa` and `main` | — | DEP-01 |
+
+The `-app` repositories (8) are not containers: they are remotes loaded by `barber-saas-front`, so
+they do not appear in the compose file.
+
+---
+
+## 11. Verification checklist
 
 - [ ] With the repositories cloned as siblings, `up.sh` starts the whole platform
 - [ ] Only the gateway and Grafana publish ports to the host

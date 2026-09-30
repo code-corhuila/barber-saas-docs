@@ -5,9 +5,12 @@ ADRs document important architectural decisions. Each file = one decision.
 ## How to create an ADR
 
 1. Copy `_template-adr.md`
-2. Name it `ADR-NNN-short-title.md` (e.g.: `ADR-001-message-broker.md`)
-3. Fill it in completely — especially the evaluated alternatives
-4. Once accepted, the status is **permanent** (it is not deleted, it is "Superseded" by another ADR)
+2. Name it with the next free number and a short English title: `ADR-NNN-short-title.md`
+   (e.g. the next one is `ADR-011-…`; check the register below first — numbers are never reused)
+3. Fill in the sections the course norm requires (4.2.3): Context, Options, Dominant criterion,
+   Accepted cost, Consequences — see `00-governance/documentation-rules.md` § "ADR format"
+4. Open it through a `docs/NNN-slug` Pull Request and add its row to the register in the same PR
+5. Once accepted, the status is **permanent** (it is not deleted, it is "Superseded" by another ADR)
 
 ## Possible statuses
 
@@ -31,4 +34,18 @@ ADRs document important architectural decisions. Each file = one decision.
 | [ADR-009](records/ADR-009-saga-state-store.md) | Saga State Store: PostgreSQL owned by the workflow | Proposed | 2026-09-28 |
 | [ADR-010](records/ADR-010-data-conventions-per-domain.md) | Data Conventions per Domain: UUID ids, money in cents, no cross-domain FK | Accepted | 2026-09-28 |
 
-> Add rows here as you create ADRs in `records/`
+## Decisions the course norm requires
+
+| Required decision (norm) | Recorded in | Status |
+|---|---|---|
+| Topology beyond the mandatory repositories (4.2.1) | ADR-004 — no extra repository: exactly the 29 mandatory ones | Accepted |
+| Language of each service (4.2.2) | ADR-005 | Accepted |
+| Database engine of each domain (4.2.2) | ADR-006 | Accepted |
+| Migration tool of each domain (4.2.2) | ADR-007 | Accepted |
+| Interface framework (4.2.2) | ADR-008 | Proposed — awaiting the teacher |
+| Where saga state is persisted (5.8.4) | ADR-009 | Proposed — awaiting the teacher |
+| Identifier type and money representation (5.3.5) | ADR-010 — UUID for every entity, `bigint` cents | Accepted |
+
+> The identifier type is **not** a separate ADR: it is decided in ADR-010 together with money and
+> cross-domain references, because the three change the same tables. ADR-005 is the language
+> decision; its number is not free.
