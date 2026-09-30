@@ -45,7 +45,7 @@ graph TD
     end
 
     subgraph DETAIL["🟣 DETAIL"]
-        C8["08-uml\ndiagrams"]
+        C8["08-diagrams\nC4 · UML · ER"]
         C9["09-microservices\ncatalog · runbooks"]
         C12["12-ux-ui\ndesign system"]
         C9 --> C8
@@ -84,7 +84,7 @@ graph TD
 | 05 | [05-architecture](./05-architecture/README.md) | How the system is organized: ADRs, deployment, patterns | 🔵 Design |
 | 06 | [06-data](./06-data/README.md) | How data is stored: models, dictionary, migrations | 🔵 Design |
 | 07 | [07-api](./07-api/README.md) | Service contracts: OpenAPI, authentication, REST guidelines | 🔵 Design |
-| 08 | [08-uml](./08-uml/README.md) | Diagrams: class, sequence, component, ER | 🔵 Design |
+| 08 | [08-diagrams](./08-diagrams/README.md) | Diagrams: C4, UML (sequence, state), ER | 🔵 Design |
 | 09 | [09-microservices](./09-microservices/README.md) | Each microservice documented individually | 🟢 Impl |
 | 10 | [10-devops](./10-devops/README.md) | CI/CD, environments, local setup, release process | 🟢 Impl |
 | 11 | [11-quality](./11-quality/README.md) | Testing strategy, code review, metrics | 🟢 Impl |

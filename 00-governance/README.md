@@ -49,7 +49,7 @@ in four blocks, in build order (see the diagram in the repository [README](../RE
 |---|---|
 | 🔵 DISCOVERY | `01-context` → `02-domain` → `03-product` → `04-requirements` |
 | 🟢 DESIGN | `05-architecture` → `06-data`, `07-api` |
-| 🟣 DETAIL | `09-microservices` → `08-uml` (→ `16-bpmn`, not created yet), `12-ux-ui` |
+| 🟣 DETAIL | `09-microservices` → `08-diagrams` (→ `16-bpmn`, not created yet), `12-ux-ui` |
 | 🟠 IMPL & OPS | `10-devops` → `11-quality`, `13-operations` → `14-training`, `15-project-control` |
 
 Three rules follow from the framework — traceability (P1), doc–code coherence (P2) and governance as

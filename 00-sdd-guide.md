@@ -37,7 +37,7 @@ flowchart TD
     G1(["🔍 Gate: Stakeholder validation"])
     P2["**PHASE 2 — DEFINITION**\n04-requirements → 05-architecture → 06-data → 07-api\n_Deliverables: user stories · ADRs · data models · OpenAPI_"]
     G2(["🔍 Gate: Architecture Review Board"])
-    P3["**PHASE 3 — DETAILED DESIGN**\n08-uml → 09-microservices → 12-ux-ui\n_Deliverables: diagrams · runbooks · wireframes_"]
+    P3["**PHASE 3 — DETAILED DESIGN**\n08-diagrams → 09-microservices → 12-ux-ui\n_Deliverables: diagrams · runbooks · wireframes_"]
     G3(["🔍 Gate: Sprint Planning kickoff"])
     P4["**PHASE 4 — IMPLEMENTATION TDD + OPERATIONS**\nCode guided by design docs · tests first\n10-devops · 13-operations · 14-training\n_Gate: Code review + QA + Go/No-Go_"]
 
@@ -79,7 +79,7 @@ flowchart TD
 ### Week 3–4 — Detailed design
 15. `09-microservices/service-catalog.md` — Full service catalog
 16. `09-microservices/services/01-[service]/` — README + data-model + events per service
-17. `08-uml/diagrams/source/` — Sequence diagram for critical flows
+17. `08-diagrams/diagrams/source/` — Sequence diagram for critical flows
 18. `12-ux-ui/navigation-map.md` + wireframes for main screens
 
 ### Sprint 1 onwards — TDD Implementation

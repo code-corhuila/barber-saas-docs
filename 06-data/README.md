@@ -69,7 +69,7 @@ how to handle migrations with data in production.
 | `02-domain/entities-and-rules.md` → domain entities | DB tables |
 | `05-architecture/` → DB engine decisions | Engine choice in `models.md` |
 | `models.md` | `07-api/contracts/` → what data each service exposes |
-| `models.md` | `08-uml/` → ER diagrams |
+| `models.md` | `08-diagrams/` → ER diagrams |
 | `models.md` | `09-microservices/[service]/data-model.md` |
 
 ---

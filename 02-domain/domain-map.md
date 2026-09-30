@@ -323,5 +323,5 @@ when the first of these stories is refined.
 
 > **Correlation:** Bounded contexts here →
 > Modules in `09-microservices/service-catalog.md` →
-> C4 diagrams in `08-uml/` →
+> C4 diagrams in `08-diagrams/` →
 > Extraction ADRs in `05-architecture/decisions/`
