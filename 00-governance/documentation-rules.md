@@ -121,20 +121,16 @@ every repository added beyond the mandatory ones — before it is created (norm 
 
 ## Owners per section
 
-| Section | Owner (role) | Who today | Review frequency |
-|---------|-------|-----------|-----------------|
-| `00-governance/` | Tech Lead | Carlos Leal | Start of each sprint |
-| `02-domain/` | Tech Lead + PO | Carlos Leal | When the domain changes |
-| `04-requirements/` | Product Owner | Carlos Leal (the whole team acts as PO, `01-context/overview.md`) | Each sprint |
-| `05-architecture/` | Tech Lead | Carlos Leal; ADRs are signed by the whole team | Each design decision |
-| `06-data/`, `07-api/contracts/` | Developer who owns the domain | Not assigned per domain yet — assign on the board with the first story of each domain | Each schema or API change |
-| `09-microservices/` | Developer who owns the domain | Same as above | Each release |
-| `13-operations/` | DevOps / On-call | Not assigned — no environment runs yet | After each incident |
-| `15-project-control/` | Tech Lead | Carlos Leal | Weekly review |
-
-Team: Carlos Leal (Tech Lead / Lead Developer / PO), Daniel Cerquera, Juan Pablo Borrero,
-Carolay Arraut (`00-governance/agile-conventions.md`). Any member may change any section through a
-PR; the owner is who answers for its coherence (rule P2).
+| Section | Owner | Review frequency |
+|---------|-------|-----------------|
+| `00-governance/` | Tech Lead | Start of each sprint |
+| `02-domain/` | Tech Lead + PO | When the domain changes |
+| `04-requirements/` | Product Owner | Each sprint |
+| `05-architecture/` | Tech Lead | Each design decision |
+| `07-api/contracts/` | Service-owning developer | Each API change |
+| `09-microservices/` | Service-owning developer | Each release |
+| `13-operations/` | DevOps / On-call | After each incident |
+| `15-project-control/` | Tech Lead | Weekly review |
 
 ---
 
