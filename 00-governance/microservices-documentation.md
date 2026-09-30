@@ -43,6 +43,13 @@ The folder of each service is named after its domain, exactly as in its reposito
 | finance-inventory | `-db`, `-api`, `-app` | `finance-inventory-service.yaml` ✅ | §8 ✅ | ❌ not created |
 | platform-admin | `-db`, `-api`, `-app` | `platform-admin-service.yaml` ✅ | §9 ✅ | ❌ not created |
 
+**Tracker disposition of the ❌ column: open, deferred — not closed.** The red items closed by #49
+(`barber-saas-docs#29`, `#31`, `#25`) are the ADR register, the identifier decision, the overview,
+the deployment view, the data model and these governance rules; none of them required the
+per-domain folders. The eight folders stay open, each one until the first story that implements
+its domain, and whoever grades them sees exactly this table. When a folder is created, its row
+changes to ✅ in the same PR.
+
 `services/02-auth-service/` is the governance framework's worked example (it says so in its
 header), not identity-auth. Until a domain gets its folder, its contract and its section of
 `06-data/models.md` are its documentation; the folder becomes mandatory with the first story that

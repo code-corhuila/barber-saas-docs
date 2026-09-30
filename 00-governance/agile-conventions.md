@@ -23,7 +23,7 @@
 - **When:** First day of the sprint — day/time by team agreement (not fixed here)
 - **Duration:** Maximum 1h
 - **Who:** Entire team — Carlos Leal (Tech Lead / Lead Developer), Daniel Cerquera, Juan Pablo Borrero, Carolay Arraut
-- **Goal:** Select and commit to the sprint's user stories, break down into technical tasks (HANDOFFs for Claude Code, per `_ecosistema/SPEC-PLAN-PROMPT.md`)
+- **Goal:** Select and commit to the sprint's user stories, break down into technical tasks (HANDOFFs for Claude Code, per the gated cycle in [definition-of-done.md](./definition-of-done.md#how-a-story-reaches-done-in-barbersaas))
 - **Output artifact:** Sprint Backlog reflected in `04-requirements/user-stories.md`
 
 ### Daily Stand-up

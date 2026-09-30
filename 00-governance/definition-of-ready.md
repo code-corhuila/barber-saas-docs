@@ -5,7 +5,7 @@
 > goes back to refinement (`agile-conventions.md`, "Backlog Refinement").
 >
 > In BarberSaaS "starting" a story means writing its SPEC → PLAN → HANDOFF
-> (`_ecosistema/SPEC-PLAN-PROMPT.md`, gates G1–G2). The DoR is what that SPEC needs as input.
+> (gates G1–G2, defined in [definition-of-done.md](./definition-of-done.md#how-a-story-reaches-done-in-barbersaas)). The DoR is what that SPEC needs as input.
 
 ---
 
@@ -100,7 +100,7 @@ list of files it changes and the tracker finding or FR it closes. It enters thro
 ## Correlations
 
 - Definition of Done → `00-governance/definition-of-done.md`
-- Workflow SPEC → PLAN → HANDOFF → review → `_ecosistema/SPEC-PLAN-PROMPT.md` (workspace root)
+- Workflow SPEC → PLAN → HANDOFF → review → [definition-of-done.md, gated cycle](./definition-of-done.md#how-a-story-reaches-done-in-barbersaas)
 - Story template and backlog → `04-requirements/_template-hu.md`, `04-requirements/user-stories.md`
 - Estimation scale and board → `00-governance/agile-conventions.md`
 - Contracts and data → `07-api/`, `06-data/models.md`
