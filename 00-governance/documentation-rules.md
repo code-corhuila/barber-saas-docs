@@ -73,7 +73,7 @@ Three rules follow from it and apply to every section:
 | Rule | Statement | Example of a violation |
 |---|---|---|
 | **P1 — Upstream traceability** | Every artifact points to its origin in the previous block: a commit or PR → a user story in `04-requirements`; a service → its ADR (`05`), its contract (`07`) and its data model (`06`); a saga → its process flow (`16-bpmn`); a pipeline → its environment (`10`) | a repository without an ADR for its language or database engine |
-| **P2 — Doc–code coherence** | What `06-data`, `07-api`, `08-uml`, `09-microservices` and `12-ux-ui` say matches the published repositories. A divergence is fixed or recorded as a risk in `15-project-control` | a service catalog that describes services that do not exist |
+| **P2 — Doc–code coherence** | What `06-data`, `07-api`, `08-diagrams`, `09-microservices` and `12-ux-ui` say matches the published repositories. A divergence is fixed or recorded as a risk in `15-project-control` | a service catalog that describes services that do not exist |
 | **P3 — Governance wraps everything** | Every team convention that the course norm asks to record lives in `00-governance` | a review rule agreed in chat but not written in `git-conventions.md` |
 
 ---
