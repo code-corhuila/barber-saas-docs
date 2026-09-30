@@ -200,6 +200,9 @@ branch of the repositories (checked with `git ls-files` on `develop`, `qa` and `
 The `-app` repositories (8) are not containers: they are remotes loaded by `barber-saas-front`, so
 they do not appear in the compose file.
 
+> This section was inserted in #49. The verification checklist that used to be §10 is now §11,
+> with its eight items unchanged: nothing was removed.
+
 ---
 
 ## 11. Verification checklist
