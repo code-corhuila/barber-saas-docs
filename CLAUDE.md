@@ -88,7 +88,7 @@ source of business rules being ported, not a target to extend.
 ## Conventions
 
 **Branches:** only `docs/NNN-slug`. This repository has only `main` — no `dev`/`qa` — and every
-change goes through a `docs/NNN-slug` branch with a Pull Request and squash merge into `main`.
+change goes through a `docs/NNN-slug` branch with a Pull Request and rebase and merge into `main`.
 Source of truth: `00-governance/git-conventions.md` § "Scope and per-repo exceptions" (do not
 duplicate this rule elsewhere; if it changes, it changes only there).
 
