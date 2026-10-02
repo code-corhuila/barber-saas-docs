@@ -82,24 +82,43 @@
 **Board URL:** Pending — no board has been created yet; create it as part of SPEC-001 (CODE repo initialization) and record the URL here
 
 ### Board columns
-| Column | Meaning |
-|--------|---------|
-| Backlog | Pending refinement |
-| Ready | Ready to enter the sprint (meets DoR) |
-| In Progress | Someone is actively working on it |
-| In Review | In Pull Request / code review |
-| Done | Meets DoD and is closed |
+| Column | Meaning | WIP limit |
+|--------|---------|-----------|
+| Backlog | Pending refinement | None |
+| Ready | Ready to enter the sprint (meets DoR) | None |
+| In Progress | Someone is actively working on it | **1** |
+| In Review | In Pull Request / code review | **2** |
+| Done | Meets DoD and is closed | None |
+
+**Why these limits:** effective team size for hands-on implementation is 1 developer
+(Daniel) most weeks — the same single-developer bottleneck already documented in
+`ADR-002-modular-monolith.md` and in "Estimated capacity" above. A WIP limit of 1 on
+"In Progress" makes that bottleneck visible on the board instead of letting several stories
+sit half-started; "In Review" allows up to 2 so a finished item can wait for review/CI while
+the next one starts, without turning "In Review" into an uncontrolled backlog of its own.
+Approved by Daniel, 2026-09-27.
 
 ---
 
 ## Team velocity
 
+**Retroactive estimation methodology (SPEC-008, 2026-09-27):** the 17 sprint-ready HUs in
+`04-requirements/user-stories.md` that were already `✅ Done` before any formal
+sprint-planning cycle existed were sized after the fact using Fibonacci (1/2/3/5), based on:
+1 point = 1 Gherkin scenario touching 1 module; 2 points = 2 scenarios, or 1 module with
+non-trivial business logic; 3 points = 2–3 scenarios touching 2 modules; 5 points = more
+than 3 scenarios, or 3+ modules touched (e.g. cross-cutting stories). These are **not**
+planning-poker consensus — they estimate already-built work to make historical throughput
+visible, and are labeled `(retroactive)` everywhere they appear. See
+`04-requirements/user-stories.md` for the per-HU breakdown.
+
 | Sprint | Story points completed | Notes |
 |--------|----------------------|-------|
-| Sprint 1 | — | — |
-| Sprint 2 | — | — |
-| Sprint 3 | — | — |
-| Average | — | — |
+| Sprint 1 | Not attributable | No commit-level evidence ties specific HUs to a specific sprint number before this backlog existed — see aggregate row |
+| Sprint 2 | Not attributable | Same as above |
+| Sprint 3 | Not attributable | Same as above |
+| **Sprints previos (agregado)** | **48 (retroactive)** | Sum of all 17 `✅ Done` sprint-ready HUs as of 2026-09-27 — see per-HU sizes in `04-requirements/user-stories.md` |
+| Average | 48 ÷ number of real sprints elapsed — **not computed**, because the number of sprints those 48 points were spread across is unknown (see `15-project-control/sprint-status.md`) | Do not average 48 points into a single unverified sprint count; wait for real sprint boundaries going forward |
 
 ---
 
