@@ -1,11 +1,17 @@
-# ERD-01…08 · One Entity-Relationship Diagram per Domain Database
+# ERD-01…08 · One Entity-Relationship Diagram per Domain Schema
 
 > **Type:** ER · **Derived from:** `06-data/models.md` §1–10 · **Decisions:** ADR-004, ADR-006,
-> ADR-010 · **Rule:** norm 7.1–7.4
+> ADR-010 · **Rule:** course norm Annex J (J.3–J.4, replaces norm 7), norm 7.4
 
-Each diagram is one database. Lines are real foreign keys **inside** that database. A column
+Each diagram is one domain's **schema** (in MongoDB, one domain's **database**), versioned by its
+`barber-saas-<domain>-db` repository. Annex J places all of them in **one instance per engine**:
+the seven PostgreSQL schemas share the instance defined in `barber-saas-infra`, and the
+notifications database lives in the MongoDB instance of `barber-saas-infra-mongo` (C4-02). Sharing
+an instance changes nothing inside a diagram: a domain writes only to its own schema and connects
+as `<domain>_app`. Lines are real foreign keys **inside** that schema. A column
 marked `ref <domain>` points to another domain: it is a UUID with **no foreign key**, checked
-through that domain's contract (norm 7.4). Every creating domain also owns `idempotency_key`,
+through that domain's contract — never a foreign key across schemas, even inside the same
+instance (Annex J J.3.4, norm 7.4). Every creating domain also owns `idempotency_key`,
 and identity-auth, appointment and loyalty own `outbox_event` (§ERD-09); they are not repeated.
 
 ## ERD-01 · identity-auth-db (PostgreSQL, schema `identity_auth`)
@@ -164,7 +170,7 @@ erDiagram
   }
 ```
 
-## ERD-06 · notifications-db (MongoDB rs0, database `notifications`)
+## ERD-06 · notifications-db (MongoDB rs0, database `notifications` in the single MongoDB instance)
 
 ```mermaid
 erDiagram
