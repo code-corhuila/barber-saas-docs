@@ -12,7 +12,7 @@
 | Category | Repositories | Branch regime |
 |---|---|---|
 | **A — Prototype** | `code-corhuila/barber-saas` | No restrictions (norma 3.1). Not evaluated after the first cut (norma 3.2). Team exception, decided 2026-09-14: work happens directly on `develop`, no new branch per task. **This exception applies to this repository only.** |
-| **B — Documentation** | `code-corhuila/barber-saas-docs` | One permanent branch: `main`. Every change goes through a child branch `docs/NNN-slug` → Pull Request → 1 approval from `ariel5253` → squash merge. **No direct commit or push to `main`, ever.** |
+| **B — Documentation** | `code-corhuila/barber-saas-docs` | One permanent branch: `main`. Every change goes through a child branch `docs/NNN-slug` → Pull Request → 1 approval from `ariel5253` → rebase and merge. **No direct commit or push to `main`, ever.** |
 | **C — Code** | the 29 `code-corhuila/barber-saas-*` repositories | Three permanent branches, `develop`, `qa` and `main`, as described below. |
 
 Branch strategy, promotion and review rules apply to category C. Branch naming, commit format and
@@ -52,6 +52,9 @@ git push -u origin qa/hu-appt-003-walk-in-appointments
 # open PR → qa
 ```
 
+- A story usually arrives in `develop` as several small commits (rebase and merge). Re-apply all of
+  them, in order, in the same `qa/…` branch: `git cherry-pick -x <first-sha>^..<last-sha>` gives each
+  one its own trail.
 - `-x` is mandatory. The line `(cherry picked from commit <sha>)` is the only link between the two
   versions of a change. A commit in `qa` or `main` without it does not count as progress.
 - The cited `<sha>` must exist in the source branch. A trail that points to a non-existent commit
@@ -119,11 +122,14 @@ Format: `<prefix>/<description-in-kebab-case>`, using lowercase letters, digits 
 
 | Into | From | Method | Why |
 |---|---|---|---|
-| `develop` | `feat/` `fix/` `chore/` | **Squash and merge** | one commit per story: that is the sha re-applied later with `-x` |
+| `develop` | `feat/` `fix/` `chore/` | **Rebase and merge** | every small commit of the story stays in the history (norm 8); each one is re-applied later with `-x` |
 | `qa` | `qa/…` | **Rebase and merge** | keeps each re-applied commit with its `-x` trail and creates no merge commit |
 | `main` (code) | `release/…`, `hotfix/…` | **Rebase and merge** | one commit per story in `main`, each with its trail |
-| `main` (DOCS) | `docs/…` | **Squash and merge** | one commit per documentation change |
+| `main` (DOCS) | `docs/…` | **Rebase and merge** | every small commit of the documentation change stays in the history |
 
+- **One method everywhere: rebase and merge.** The flow is the same in every repository — child
+  branch → pull request → merge — and every small commit lands on the target branch, linear and
+  without merge commits. Squash is not used: it collapses the steps the course evaluates.
 - *Rebase and merge* on GitHub applies the PR commits on top of the target. It does not rewrite any
   published branch.
 - **Never** merge one permanent branch into another.
