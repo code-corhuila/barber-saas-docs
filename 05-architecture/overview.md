@@ -9,7 +9,7 @@
 
 ## 1. Adopted architectural style
 
-**Style:** Microservices — one service and one database per business domain, behind a single
+**Style:** Microservices — one service and one database schema per business domain, behind a single
 API gateway, with cross-domain processes orchestrated as sagas.
 
 **Justification:** the course requires a full distributed-systems deliverable, and the team's
@@ -142,9 +142,11 @@ All repositories carry the `barber-saas-` prefix. Contracts live in
 ## 5. Architectural principles
 
 ### P1: Database per service
-Each domain owns one database, in its own instance and volume, versioned only in its `-db`
-repository (norm 7.1–7.2). No foreign key crosses domains: a reference to another domain is a
-UUID checked through that domain's contract (norm 7.4).
+Each domain owns one schema (one database in MongoDB), versioned only in its `-db` repository,
+inside the **single instance of its engine** (ADR-011, course norm Annex J, which replaces
+norm 7.1). Each service connects as `<domain>_app` and writes only to its own schema. No foreign
+key crosses domains: a reference to another domain is a UUID checked through that domain's
+contract (norm 7.4, Annex J J.3.4).
 
 ### P2: Tenant isolation in every service
 The JWT carries the user's `barbershopId`. Every domain service derives the tenant from the
@@ -179,7 +181,7 @@ e-mails, notifications) is Spanish (Colombia).
 
 | Pattern | Adopted | Reference |
 |---|---|---|
-| Database per Service | Yes — 8 instances: PostgreSQL ×7, MongoDB ×1 | ADR-006, norm 7.1 |
+| Database per Service | Yes — one schema per domain in one instance per engine: PostgreSQL (7 schemas), MongoDB (1 database) | ADR-006, ADR-011, Annex J |
 | API Gateway | Yes — NGINX, per-request resolution, one routes file per domain | Norm 5.6, annex F |
 | Saga (orchestration) | Yes — in `-workflow`, state persisted after each step | Norm 5.8, ADR-009 (proposed) |
 | Transactional Outbox | Yes — every service that publishes events | Norm 5.3.11 |

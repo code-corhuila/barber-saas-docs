@@ -307,7 +307,7 @@ when the first of these stories is refined.
 |---|---|---|
 | Schedule is its own service and database, not a Shared Kernel with Appointment | Keep the shared tables (prototype) | ADR-004 and norm 7.3: no service reads another domain's database. How availability learns about bookings is OQ-09 |
 | Loyalty reacts to `AppointmentCompleted` as an event | In-process call inside the booking transaction (prototype) | Two databases cannot share a transaction (norm 7.5); the outbox plus a unique sticker per appointment make delivery safe to repeat |
-| One database per bounded context (ADR-004, ADR-006) | Single PostgreSQL schema with `barbershop_id` (prototype, ADR-002 — superseded) | Course requirement and norm 7.1; tenant isolation now repeated in each service (`07-api/authentication.md`) |
+| One schema per bounded context, in one instance per engine (ADR-004, ADR-006, ADR-011) | Single PostgreSQL schema with `barbershop_id` (prototype, ADR-002 — superseded) | Course requirement and Annex J (replaces norm 7.1); tenant isolation now repeated in each service (`07-api/authentication.md`) |
 
 ---
 

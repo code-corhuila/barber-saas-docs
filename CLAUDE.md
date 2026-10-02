@@ -55,7 +55,7 @@ Multi-tenant SaaS for managing barbershops. User roles: `CLIENT`, `BARBER`,
 **Architecture:** full microservice decomposition (ADR-004) — eight domains (`identity-auth`,
 `barbershop`, `appointment`, `schedule`, `loyalty`, `notifications`, `finance-inventory`,
 `platform-admin`), each with its own `-db`, `-api` and `-app` repository, plus `api-gateway`,
-`workflow`, `worker`, `infra` and `front`. One database per domain (ADR-006), UUID ids and money
+`workflow`, `worker`, `infra` and `front`. One schema per domain in one instance per engine (ADR-006, ADR-011), UUID ids and money
 in cents (ADR-010). Topology: `05-architecture/overview.md`.
 
 **Multi-tenancy — the rule that is not negotiable.** Isolation is by the `barbershop_id` column,
