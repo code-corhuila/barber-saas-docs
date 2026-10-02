@@ -93,7 +93,7 @@ proves it pasted in the report or the PR.
 documentation change is Done when:
 
 - [ ] It went through a `docs/…` branch and a Pull Request, never a direct commit to `main`
-- [ ] The PR is approved by `ariel5253` and squash-merged
+- [ ] The PR is approved by `ariel5253` and merged with rebase and merge
 - [ ] Every changed OpenAPI contract passes `npx @redocly/cli lint` and its `$ref`s still resolve
 - [ ] The documents it touches agree with the sections they cite (rule P2); a contradiction that
       cannot be resolved with evidence is written in the PR, not guessed
