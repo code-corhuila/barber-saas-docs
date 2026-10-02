@@ -8,7 +8,7 @@
 | ID | Name | Level | File | Derived from | Updated |
 |---|---|---|---|---|---|
 | C4-01 | System context | L1 | [`c4/c1-system-context.md`](c4/c1-system-context.md) | `05-architecture/overview.md` §2 · `07-api/authentication.md` | 2026-09-30 |
-| C4-02 | Containers | L2 | [`c4/c2-containers.md`](c4/c2-containers.md) | `05-architecture/overview.md` §3–4 · `deployment.md` · ADR-004/006/009 | 2026-09-30 |
+| C4-02 | Containers | L2 | [`c4/c2-containers.md`](c4/c2-containers.md) | `05-architecture/overview.md` §3–4 · `deployment.md` · ADR-004/006/009 · Annex J | 2026-10-02 |
 | C4-03 | appointment-api components | L3 | [`c4/c3-appointment-api.md`](c4/c3-appointment-api.md) | `05-architecture/hexagonal-architecture.md` | 2026-09-30 |
 
 ## Behavior — UML
@@ -24,16 +24,16 @@
 
 ## Data — ER
 
-| ID | Database | Engine | File | Derived from | Updated |
+| ID | Domain schema (`-db` repository) | Engine | File | Derived from | Updated |
 |---|---|---|---|---|---|
-| ERD-01 | identity-auth-db | PostgreSQL | [`er/erd-domain-databases.md`](er/erd-domain-databases.md#erd-01--identity-auth-db-postgresql-schema-identity_auth) | `06-data/models.md` §2 | 2026-09-30 |
-| ERD-02 | barbershop-db | PostgreSQL | same file | §3 | 2026-09-30 |
-| ERD-03 | schedule-db | PostgreSQL | same file | §4 | 2026-09-30 |
-| ERD-04 | appointment-db | PostgreSQL | same file | §5 | 2026-09-30 |
-| ERD-05 | loyalty-db | PostgreSQL | same file | §6 | 2026-09-30 |
-| ERD-06 | notifications-db | MongoDB | same file | §7 | 2026-09-30 |
-| ERD-07 | finance-inventory-db | PostgreSQL | same file | §8 | 2026-09-30 |
-| ERD-08 | platform-admin-db | PostgreSQL | same file | §9 | 2026-09-30 |
+| ERD-01 | `identity_auth` (identity-auth-db) | PostgreSQL | [`er/erd-domain-databases.md`](er/erd-domain-databases.md#erd-01--identity-auth-db-postgresql-schema-identity_auth) | `06-data/models.md` §2 · Annex J | 2026-10-02 |
+| ERD-02 | `barbershop` (barbershop-db) | PostgreSQL | same file | §3 | 2026-09-30 |
+| ERD-03 | `schedule` (schedule-db) | PostgreSQL | same file | §4 | 2026-09-30 |
+| ERD-04 | `appointment` (appointment-db) | PostgreSQL | same file | §5 | 2026-09-30 |
+| ERD-05 | `loyalty` (loyalty-db) | PostgreSQL | same file | §6 | 2026-09-30 |
+| ERD-06 | `notifications` database (notifications-db) | MongoDB | same file | §7 | 2026-09-30 |
+| ERD-07 | `finance_inventory` (finance-inventory-db) | PostgreSQL | same file | §8 | 2026-09-30 |
+| ERD-08 | `platform_admin` (platform-admin-db) | PostgreSQL | same file | §9 | 2026-09-30 |
 | ERD-09 | `idempotency_key`, `outbox_event` (every domain) | both | same file | §10 | 2026-09-30 |
 
 ## Divergences found while drawing (rule P2)
@@ -47,6 +47,10 @@ the most specific source and flag the point; none is resolved here.
 | D-2 | C4-02, SEQ-02 | The booking contract checks the slot against the barber's schedule, but the appointment-api structure lists no port toward schedule-api (only `BarbershopCatalog`) | `appointment-service.yaml` · `05-architecture/hexagonal-architecture.md` |
 | D-3 | SEQ-03 | `domain-events.md` still describes the prototype (in-process calls, income registered in finance on completion); finance-inventory's contract declares no consumer of `AppointmentCompleted` | `02-domain/domain-events.md` · `finance-inventory-service.yaml` |
 | D-4 | C4-02, SEQ-03 | Event transport between outboxes and consumers is undecided | `05-architecture/overview.md` AT-004 |
+| D-5 | C4-02, ERD-01…09 | Annex J (2026-10-01) replaces norm 7.1: one instance per engine in the infrastructure, one schema per domain, `<domain>_app` users, a changelog table per `-db`, and `-db` repositories without an instance or volume. The diagrams follow Annex J; these documents still describe one instance per domain | ADR-006 · `05-architecture/deployment.md` §5 · `06-data/models.md` §1 |
+| D-6 | C4-02 | ADR-005 (*Accepted*) writes all ten services in Java 21; Annex J J.1.2 requires at least two backend languages (Go, Java, Python or C#) | ADR-005 |
+| D-7 | C4-02 | Annex J J.1.2 requires one `<abbr>-<domain>-portal` per domain, built with React and Angular; our domain interfaces are `-app` repositories (mobile) and ADR-008 is *Proposed*, awaiting the teacher | ADR-008 · `09-microservices/service-catalog.md` |
+| D-8 | C4-02 | Annex J requires `barber-saas-infra-mongo` (it does not exist) and recommends renaming `barber-saas-infra` to `barber-saas-infra-postgres`; both are done by the teacher on request through an issue in this repository (J.8.3) | `05-architecture/deployment.md` · `09-microservices/service-catalog.md` |
 
 ## Not drawn yet
 
