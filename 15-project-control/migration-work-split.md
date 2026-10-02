@@ -80,7 +80,7 @@ git checkout -b feat/<short-description>        # one child branch per piece of 
 # … one commit per logical step …
 git push -u origin feat/<short-description>
 gh pr create --base develop                     # body: Refs: code-corhuila/barber-saas-docs#NN
-# merge into develop when CI is green, keeping the commits (merge, not squash)
+# when CI is green: gh pr merge <n> --rebase   (every small commit stays in develop)
 git checkout develop && git pull
 ```
 
