@@ -7,6 +7,10 @@
 
 ## What is here and how to fill it in
 
+### `migration-work-split.md`
+Who builds which of the 29 repositories during the migration from the prototype, the shared
+points and the daily workflow that keeps three developers from blocking each other.
+
 ### `risks.md` ⭐
 Project risk register.
 **Fill in:** from the start of the project. Update each sprint.
