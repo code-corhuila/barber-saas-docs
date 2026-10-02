@@ -28,18 +28,18 @@ real, current state, and the single largest item in "Identified gaps" below.
 
 | FR ID | FR Description | HU(s) | Tests that verify it | Service | Status |
 |-------|---------------|-------|---------------------|---------|--------|
-| FR-001 | User registration | HU-AUTH-001 | None | `auth` | ✅ Implemented, untested |
-| FR-002 | Login, JWT issuance | HU-AUTH-001 | None | `auth` | ✅ Implemented, untested |
+| FR-001 | User registration | HU-AUTH-001-A | None | `auth` | ✅ Implemented, untested |
+| FR-002 | Login, JWT issuance | HU-AUTH-001-B | None | `auth` | ✅ Implemented, untested |
 | FR-003 | Password recovery via email | HU-AUTH-002 | None | `auth`, `notification` | ✅ Implemented, untested |
 | FR-004 | Barbershop self-registration + trial | HU-AUTH-003 | None | `auth`, `barbershop` | ✅ Implemented, untested |
-| FR-005 | Service catalog configuration | HU-SHOP-001 | None | `barberservice` | ✅ Implemented, untested |
-| FR-006 | Barber weekly schedule, no overlap | HU-SHOP-001 | None | `schedule` | ✅ Implemented, untested |
-| FR-007 | Schedule exceptions override | HU-SHOP-001 | None | `schedule` | ✅ Implemented, untested |
-| FR-008 | Appointment booking, anti-double-booking | HU-APPT-001 | None | `appointment` | ✅ Implemented, untested — **highest-risk untested path**: the pessimistic lock has no automated concurrency test |
-| FR-009 | Price snapshot immutability | HU-APPT-001 | None | `appointment` | ✅ Implemented, untested |
-| FR-010 | Reward coupon auto-applied at booking | HU-APPT-001 | None | `appointment`, `loyalty` | ✅ Implemented, untested |
-| FR-011 | Cancellation within policy window | HU-APPT-002 | None | `appointment` | ✅ Implemented, untested |
-| FR-012 | Automatic NO_SHOW marking | HU-APPT-002 | None | `appointment` | ✅ Implemented, untested |
+| FR-005 | Service catalog configuration | HU-SHOP-001-A | None | `barberservice` | ✅ Implemented, untested |
+| FR-006 | Barber weekly schedule, no overlap | HU-SHOP-001-B | None | `schedule` | ✅ Implemented, untested |
+| FR-007 | Schedule exceptions override | HU-SHOP-001-B | None | `schedule` | ✅ Implemented, untested |
+| FR-008 | Appointment booking, anti-double-booking | HU-APPT-001-A | None | `appointment` | ✅ Implemented, untested — **highest-risk untested path**: the pessimistic lock has no automated concurrency test |
+| FR-009 | Price snapshot immutability | HU-APPT-001-A | None | `appointment` | ✅ Implemented, untested |
+| FR-010 | Reward coupon auto-applied at booking | HU-APPT-001-B | None | `appointment`, `loyalty` | ✅ Implemented, untested |
+| FR-011 | Cancellation within policy window | HU-APPT-002-A | None | `appointment` | ✅ Implemented, untested |
+| FR-012 | Automatic NO_SHOW marking | HU-APPT-002-B | None | `appointment` | ✅ Implemented, untested |
 | FR-013 | Grant loyalty sticker | HU-LOY-001 | None | `loyalty` | ✅ Implemented, untested |
 | FR-014 | Reject redemption with insufficient stickers | HU-LOY-001 | None | `loyalty` | ✅ Implemented, untested |
 | FR-015 | Issue reward coupon on redemption | HU-LOY-001 | None | `loyalty` | ✅ Implemented, untested |
@@ -47,13 +47,13 @@ real, current state, and the single largest item in "Identified gaps" below.
 | FR-017 | Reject non-positive finance amount | HU-FIN-001 | None | `finance` | ✅ Implemented, untested |
 | FR-018 | Track stock, register movements | HU-INV-001 | None | `inventory` | ✅ Implemented, untested |
 | FR-019 | Low-stock alert flag | HU-INV-001 | None | `inventory` | ✅ Implemented, untested |
-| FR-020 | Notify on booking/confirm/cancel | HU-NOTIF-001 | None | `notification`, `appointment` | ✅ Implemented, untested |
-| FR-021 | Day-before reminder job | HU-NOTIF-001 | None | `notification`, `appointment` | ✅ Implemented, untested |
-| FR-022 | Notify on completion | HU-NOTIF-001 | None | `notification`, `appointment` | 🔴 Not implemented |
-| FR-023 | Super Admin dashboard & barbershop list | HU-SADMIN-001 | None | `dashboard`, `barbershop` | ✅ Implemented, untested |
-| FR-024 | Subscription plan management | HU-SADMIN-001 | None | `plan` | ✅ Implemented, untested |
-| FR-025 | Only Super Admin transitions billing status | HU-SADMIN-001 | None | `barbershop` | ✅ Implemented, untested |
-| FR-026 | Automatic trial expiration | HU-SADMIN-001 | None | `barbershop` | 🔴 Not implemented |
+| FR-020 | Notify on booking/confirm/cancel | HU-NOTIF-001-A | None | `notification`, `appointment` | ✅ Implemented, untested |
+| FR-021 | Day-before reminder job | HU-NOTIF-001-B | None | `notification`, `appointment` | ✅ Implemented, untested |
+| FR-022 | Notify on completion | HU-NOTIF-001-A | None | `notification`, `appointment` | 🔴 Not implemented |
+| FR-023 | Super Admin dashboard & barbershop list | HU-SADMIN-001-A | None | `dashboard`, `barbershop` | ✅ Implemented, untested |
+| FR-024 | Subscription plan management | HU-SADMIN-001-A | None | `plan` | ✅ Implemented, untested |
+| FR-025 | Only Super Admin transitions billing status | HU-SADMIN-001-A | None | `barbershop` | ✅ Implemented, untested |
+| FR-026 | Automatic trial expiration | HU-SADMIN-001-B | None | `barbershop` | 🔴 Not implemented |
 | FR-027 | Tenant resolved from JWT into TenantContext | HU-TENANT-001 | None | `security` | ✅ Implemented, untested — **second highest-risk untested path**: no automated test proves cross-tenant isolation holds |
 | FR-028 | Cross-tenant access rejected | HU-TENANT-001 | None | `security` | ✅ Implemented, untested |
 
@@ -75,21 +75,28 @@ real, current state, and the single largest item in "Identified gaps" below.
 
 | HU | Title | FR(s) it implements | Sprint |
 |----|-------|---------------------|--------|
-| HU-AUTH-001 | Register and log in | FR-001, FR-002 | Not yet scheduled |
-| HU-AUTH-002 | Password recovery | FR-003 | Not yet scheduled |
-| HU-AUTH-003 | Barbershop self-registration | FR-004 | Not yet scheduled |
-| HU-SHOP-001 | Service catalog & schedules | FR-005, FR-006, FR-007 | Not yet scheduled |
-| HU-APPT-001 | Book an appointment | FR-008, FR-009, FR-010 | Not yet scheduled |
-| HU-APPT-002 | Cancel / auto no-show | FR-011, FR-012 | Not yet scheduled |
-| HU-LOY-001 | Earn and redeem loyalty | FR-013, FR-014, FR-015 | Not yet scheduled |
-| HU-FIN-001 | Track income/expenses | FR-016, FR-017 | Not yet scheduled |
-| HU-INV-001 | Track inventory | FR-018, FR-019 | Not yet scheduled |
-| HU-NOTIF-001 | Appointment notifications | FR-020, FR-021, FR-022 | Not yet scheduled |
-| HU-SADMIN-001 | Manage barbershops & plans | FR-023, FR-024, FR-025, FR-026 | Not yet scheduled |
-| HU-TENANT-001 | Tenant isolation | FR-027, FR-028 | Not yet scheduled |
+| HU-AUTH-001-A | Register a role-based account | FR-001 | Sprint 1 (inferred) |
+| HU-AUTH-001-B | Log in with a role-based account | FR-002 | Sprint 1 (inferred) |
+| HU-AUTH-002 | Password recovery | FR-003 | Sprint 1 (inferred) |
+| HU-AUTH-003 | Barbershop self-registration | FR-004 | Sprint 1 (inferred) |
+| HU-SHOP-001-A | Service catalog configuration | FR-005 | Sprint 1 (inferred) |
+| HU-SHOP-001-B | Staff schedules & exceptions | FR-006, FR-007 | Sprint 1 (inferred) |
+| HU-APPT-001-A | Book an appointment (anti-double-booking) | FR-008, FR-009 | Sprint 1 (inferred) |
+| HU-APPT-001-B | Auto-apply loyalty coupon at booking | FR-010 | Sprint 1 (inferred) |
+| HU-APPT-002-A | Cancel within policy | FR-011 | Sprint 1 (inferred) |
+| HU-APPT-002-B | Automatic no-show marking | FR-012 | Sprint 1 (inferred) |
+| HU-LOY-001 | Earn and redeem loyalty | FR-013, FR-014, FR-015 | Sprint 2 (inferred) |
+| HU-FIN-001 | Track income/expenses | FR-016, FR-017 | Sprint 1 (inferred) |
+| HU-INV-001 | Track inventory | FR-018, FR-019 | Sprint 1 (inferred) |
+| HU-NOTIF-001-A | Notify on state change (+ gap: completion) | FR-020, FR-022 | Sprint 1 (inferred) |
+| HU-NOTIF-001-B | Day-before reminder job | FR-021 | Sprint 1 (inferred) |
+| HU-SADMIN-001-A | View & manually manage barbershops/plans | FR-023, FR-024, FR-025 | Sprint 1 (inferred) |
+| HU-SADMIN-001-B | Automatic trial expiration (gap) | FR-026 | Not yet scheduled |
+| HU-TENANT-001 | Tenant isolation | FR-027, FR-028 | Sprint 1 (inferred) |
 
-> "Sprint" is left unscheduled across the board — see `00-governance/agile-conventions.md`:
-> no formal sprint-planning cycle with dates has been run yet for this backlog.
+> "Sprint" values above are the same inference documented in
+> `15-project-control/sprint-status.md` (2026-08-31 = Sprint 1 start, a Monday) — **provisional,
+> pending Daniel's confirmation**, not a formally run sprint-planning cycle with dates.
 
 ---
 

@@ -5,10 +5,14 @@
 > verified against the real backend code in `02-domain/entities-and-rules.md` and
 > `02-domain/domain-map.md` — no new business rule is invented here.
 >
-> **What is deliberately left blank:** Story Points and Target Sprint. No real estimation
-> session has happened yet (see `00-governance/agile-conventions.md` → Estimation). Marking
-> these as a specific number would misrepresent planning work that hasn't occurred. Status
-> reflects real implementation state, verified against the codebase.
+> **2026-09-27 (SPEC-008):** the 10 epic-sized HUs originally formalized here were split
+> into 18 sprint-ready HUs, per `00-governance/definition-of-ready.md` and rule #4 below
+> ("One HU = one unit of value"). Each split HU carries a `Split from` field pointing to its
+> original epic-sized parent. Story Points are now filled in for every `✅ Done` HU using a
+> **retroactive estimation methodology** (see `00-governance/agile-conventions.md` § "Team
+> velocity") — these are not planning-poker consensus, they size already-built work so
+> historical throughput is visible. HUs that are not yet done (gaps) are marked
+> "pending real estimation" where a retroactive size cannot be honestly derived.
 
 ---
 
@@ -16,13 +20,8 @@
 
 | Cut | Epics covered | Total HUs | Status |
 |-----|--------|-----------|--------|
-| This pass | EP-001 … EP-009 (all) | 10 | 9 Done, 1 partially Done (see HU-APPT gaps below) |
-
-This is a first formalization pass — one representative HU per epic (two for Appointment,
-the core domain). Each HU below is large enough that, per
-`00-governance/definition-of-ready.md`, it should be **split into smaller HUs during
-refinement** before being scheduled into a sprint — it is documented here at
-feature-granularity, not sprint-ready granularity.
+| 2026-09-17 (first pass) | EP-001 … EP-009 (all) | 10 (epic-sized) | 9 Done, 1 partially Done |
+| 2026-09-27 (SPEC-008 split) | EP-001 … EP-009 (all) | 18 (sprint-ready) | 17 Done, 1 not implemented (HU-SADMIN-001-B) |
 
 ---
 
@@ -44,12 +43,12 @@ feature-granularity, not sprint-ready granularity.
 
 ## User Stories
 
-### HU-AUTH-001 — Register and log in with a role-based account {#HU-AUTH-001}
+### HU-AUTH-001-A — Register a role-based account {#HU-AUTH-001-A}
 
-**Epic:** EP-001
+**Epic:** EP-001 · **Split from:** HU-AUTH-001
 
 > **As** a new user (client, barber, or barbershop admin)
-> **I want** to register an account and log in
+> **I want** to register an account
 > **so that** I can access the features available to my role without sharing credentials with anyone else
 
 **Acceptance Criteria:**
@@ -65,8 +64,40 @@ Scenario 2: Duplicate email rejected
   Given an email that is already registered on the platform
   When a user submits registration with that email
   Then the system rejects it with a validation error
+```
 
-Scenario 3: Successful login
+**Technical notes:**
+
+**Responsible service(s):** `com.barbersaas.auth`
+**Endpoint(s) implemented:** `POST /api/auth/register`
+**Required permissions:** None (public endpoint)
+
+**Definition of Done:** See `00-governance/definition-of-done.md`.
+
+| Field | Value |
+|-------|-------|
+| Split from | HU-AUTH-001 |
+| Story Points | 3 (retroactive) |
+| Priority | Must Have |
+| Target sprint | Sprint 1 (inferred, see `15-project-control/sprint-status.md`) |
+| Status | ✅ Done |
+| Dependencies | None |
+| Affected service(s) | `auth` |
+
+---
+
+### HU-AUTH-001-B — Log in with a role-based account {#HU-AUTH-001-B}
+
+**Epic:** EP-001 · **Split from:** HU-AUTH-001
+
+> **As** a registered user (client, barber, or barbershop admin)
+> **I want** to log in
+> **so that** I can access the features available to my role
+
+**Acceptance Criteria:**
+
+```gherkin
+Scenario 1: Successful login
   Given valid credentials for an existing account
   When the user logs in
   Then the system returns a JWT access token (24h expiration) and a refresh token (7-day expiration)
@@ -75,18 +106,17 @@ Scenario 3: Successful login
 **Technical notes:**
 
 **Responsible service(s):** `com.barbersaas.auth`
-**Endpoint(s) implemented:** `POST /api/auth/register`, `POST /api/auth/login`
-**Required permissions:** None (public endpoints)
-
-**Definition of Done:** See `00-governance/definition-of-done.md`.
+**Endpoint(s) implemented:** `POST /api/auth/login`
+**Required permissions:** None (public endpoint)
 
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
+| Split from | HU-AUTH-001 |
+| Story Points | 2 (retroactive) |
 | Priority | Must Have |
-| Target sprint | Not yet scheduled — split into smaller HUs during refinement first |
+| Target sprint | Sprint 1 (inferred) |
 | Status | ✅ Done |
-| Dependencies | None |
+| Dependencies | HU-AUTH-001-A |
 | Affected service(s) | `auth` |
 
 ---
@@ -121,11 +151,11 @@ Scenario 2: Reset with a valid code
 
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
+| Story Points | 3 (retroactive) |
 | Priority | Must Have |
-| Target sprint | Not yet scheduled |
+| Target sprint | Sprint 1 (inferred) |
 | Status | ✅ Done |
-| Dependencies | HU-AUTH-001 |
+| Dependencies | HU-AUTH-001-A |
 | Affected service(s) | `auth`, `notification` |
 
 ---
@@ -156,22 +186,22 @@ Scenario 1: Successful self-registration
 
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
+| Story Points | 3 (retroactive) |
 | Priority | Must Have |
-| Target sprint | Not yet scheduled |
+| Target sprint | Sprint 1 (inferred) |
 | Status | ✅ Done |
 | Dependencies | None |
 | Affected service(s) | `auth`, `barbershop` |
 
 ---
 
-### HU-SHOP-001 — Configure service catalog and staff schedules {#HU-SHOP-001}
+### HU-SHOP-001-A — Configure the barbershop's service catalog {#HU-SHOP-001-A}
 
-**Epic:** EP-002
+**Epic:** EP-002 · **Split from:** HU-SHOP-001
 
 > **As** an `ADMIN_BARBERSHOP`
-> **I want** to configure my barbershop's service catalog and my barbers' weekly schedules
-> **so that** clients see accurate availability and pricing when booking
+> **I want** to configure my barbershop's service catalog
+> **so that** clients see accurate pricing and duration when booking
 
 **Acceptance Criteria:**
 
@@ -180,13 +210,43 @@ Scenario 1: Create a service
   Given I am authenticated as ADMIN_BARBERSHOP
   When I create a service with a name, price, and duration
   Then it is scoped to my barbershopId and visible only within my tenant
+```
 
-Scenario 2: Overlapping schedule rejected
+**Technical notes:**
+
+**Responsible service(s):** `com.barbersaas.barberservice`
+**Endpoint(s) implemented:** `GET/POST /api/admin/services`, `PUT/PATCH /api/admin/services/{id}`
+**Required permissions:** `ADMIN_BARBERSHOP`
+
+| Field | Value |
+|-------|-------|
+| Split from | HU-SHOP-001 |
+| Story Points | 2 (retroactive) |
+| Priority | Must Have |
+| Target sprint | Sprint 1 (inferred) |
+| Status | ✅ Done |
+| Dependencies | HU-AUTH-003 |
+| Affected service(s) | `barberservice` |
+
+---
+
+### HU-SHOP-001-B — Manage staff weekly schedules and exceptions {#HU-SHOP-001-B}
+
+**Epic:** EP-002 · **Split from:** HU-SHOP-001
+
+> **As** an `ADMIN_BARBERSHOP`
+> **I want** to configure my barbers' weekly schedules, with exceptions for specific dates
+> **so that** clients see accurate availability when booking
+
+**Acceptance Criteria:**
+
+```gherkin
+Scenario 1: Overlapping schedule rejected
   Given a barber already has a schedule slot for a given day
   When I attempt to save an overlapping schedule slot for that same barber/day
   Then the system rejects it
 
-Scenario 3: Schedule exception overrides, never merges
+Scenario 2: Schedule exception overrides, never merges
   Given a barber has a regular weekly schedule for a given day of week
   When I register a schedule exception for a specific date (day off or modified hours)
   Then that exception overrides the weekly schedule for that date, it does not merge with it
@@ -194,24 +254,25 @@ Scenario 3: Schedule exception overrides, never merges
 
 **Technical notes:**
 
-**Responsible service(s):** `com.barbersaas.barberservice`, `com.barbersaas.schedule`
-**Endpoint(s) implemented:** `GET/POST /api/admin/services`, `PUT/PATCH /api/admin/services/{id}`
+**Responsible service(s):** `com.barbersaas.schedule`
+**Endpoint(s) implemented:** (schedule management endpoints under `/api/admin/schedule`)
 **Required permissions:** `ADMIN_BARBERSHOP`
 
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
+| Split from | HU-SHOP-001 |
+| Story Points | 3 (retroactive) |
 | Priority | Must Have |
-| Target sprint | Not yet scheduled |
+| Target sprint | Sprint 1 (inferred) |
 | Status | ✅ Done |
-| Dependencies | HU-AUTH-003 |
-| Affected service(s) | `barberservice`, `schedule` |
+| Dependencies | HU-SHOP-001-A |
+| Affected service(s) | `schedule` |
 
 ---
 
-### HU-APPT-001 — Book an appointment without double-booking {#HU-APPT-001}
+### HU-APPT-001-A — Book an appointment without double-booking {#HU-APPT-001-A}
 
-**Epic:** EP-003 (Core Domain)
+**Epic:** EP-003 (Core Domain) · **Split from:** HU-APPT-001
 
 > **As** a `CLIENT`
 > **I want** to book an appointment with a specific barber, service, date, and time
@@ -235,11 +296,6 @@ Scenario 3: Past-date booking rejected
   Given a requested date/time is in the past
   When I attempt to book
   Then the system rejects it
-
-Scenario 4: Active reward coupon applied automatically
-  Given I have an ACTIVE RewardCoupon for this barbershop
-  When I book an appointment at that barbershop
-  Then the coupon is applied and marked USED in the same transaction
 ```
 
 **Technical notes:**
@@ -248,20 +304,59 @@ Scenario 4: Active reward coupon applied automatically
 **Endpoint(s) implemented:** `POST /api/client/appointments`
 **Required permissions:** `CLIENT`
 
+> **Known gap (traceability-matrix.md FR-008):** highest-risk untested path — the pessimistic
+> lock has no automated concurrency test.
+
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
+| Split from | HU-APPT-001 |
+| Story Points | 5 (retroactive) |
 | Priority | Must Have |
-| Target sprint | Not yet scheduled |
+| Target sprint | Sprint 1 (inferred) |
 | Status | ✅ Done |
-| Dependencies | HU-SHOP-001 |
-| Affected service(s) | `appointment`, `loyalty` (coupon consumption) |
+| Dependencies | HU-SHOP-001-B |
+| Affected service(s) | `appointment` |
 
 ---
 
-### HU-APPT-002 — Cancel an appointment within policy, and auto-mark no-shows {#HU-APPT-002}
+### HU-APPT-001-B — Apply an active loyalty coupon automatically at booking {#HU-APPT-001-B}
 
-**Epic:** EP-003
+**Epic:** EP-003 · **Split from:** HU-APPT-001
+
+> **As** a `CLIENT`
+> **I want** my active reward coupon to be applied automatically when I book
+> **so that** I don't have to remember to redeem it manually
+
+**Acceptance Criteria:**
+
+```gherkin
+Scenario 1: Active reward coupon applied automatically
+  Given I have an ACTIVE RewardCoupon for this barbershop
+  When I book an appointment at that barbershop
+  Then the coupon is applied and marked USED in the same transaction
+```
+
+**Technical notes:**
+
+**Responsible service(s):** `com.barbersaas.appointment`, `com.barbersaas.loyalty`
+**Endpoint(s) implemented:** `POST /api/client/appointments`
+**Required permissions:** `CLIENT`
+
+| Field | Value |
+|-------|-------|
+| Split from | HU-APPT-001 |
+| Story Points | 2 (retroactive) |
+| Priority | Should Have |
+| Target sprint | Sprint 1 (inferred) |
+| Status | ✅ Done |
+| Dependencies | HU-APPT-001-A, HU-LOY-001 |
+| Affected service(s) | `appointment`, `loyalty` |
+
+---
+
+### HU-APPT-002-A — Cancel an appointment within policy {#HU-APPT-002-A}
+
+**Epic:** EP-003 · **Split from:** HU-APPT-002
 
 > **As** a `CLIENT`
 > **I want** to cancel my appointment with enough notice
@@ -281,8 +376,38 @@ Scenario 2: Cancellation inside the policy window rejected for clients
   When a CLIENT attempts to cancel
   Then the system rejects it
   (Admins and barbers are exempt from this restriction)
+```
 
-Scenario 3: Automatic no-show marking
+**Technical notes:**
+
+**Responsible service(s):** `com.barbersaas.appointment`
+**Endpoint(s) implemented:** `PATCH /api/client/appointments/{id}/cancel`, `PATCH /api/admin/appointments/{id}/cancel`
+**Required permissions:** `CLIENT`, `ADMIN_BARBERSHOP`
+
+| Field | Value |
+|-------|-------|
+| Split from | HU-APPT-002 |
+| Story Points | 3 (retroactive) |
+| Priority | Must Have |
+| Target sprint | Sprint 1 (inferred) |
+| Status | ✅ Done |
+| Dependencies | HU-APPT-001-A |
+| Affected service(s) | `appointment`, `notification` |
+
+---
+
+### HU-APPT-002-B — Automatically mark past appointments as no-show {#HU-APPT-002-B}
+
+**Epic:** EP-003 · **Split from:** HU-APPT-002
+
+> **As** the BarberSaaS platform
+> **I want** to automatically mark CONFIRMED appointments as NO_SHOW once their date passes uncompleted
+> **so that** barbers and admins have an accurate record without manual bookkeeping
+
+**Acceptance Criteria:**
+
+```gherkin
+Scenario 1: Automatic no-show marking
   Given a CONFIRMED appointment's date has passed without being completed
   When the daily 01:00 scheduled job runs
   Then the appointment is automatically marked NO_SHOW, with no notification sent (documented gap)
@@ -291,17 +416,20 @@ Scenario 3: Automatic no-show marking
 **Technical notes:**
 
 **Responsible service(s):** `com.barbersaas.appointment`
-**Endpoint(s) implemented:** `PATCH /api/client/appointments/{id}/cancel`, `PATCH /api/admin/appointments/{id}/cancel`, scheduled job `AppointmentReminderJob#markPastAppointmentsAsNoShow`
-**Required permissions:** `CLIENT`, `ADMIN_BARBERSHOP`
+**Endpoint(s) implemented:** scheduled job `AppointmentReminderJob#markPastAppointmentsAsNoShow`
+**Required permissions:** N/A (system job)
+
+> **Known gap:** no notification is sent to the client when this transition happens.
 
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
-| Priority | Must Have |
-| Target sprint | Not yet scheduled |
+| Split from | HU-APPT-002 |
+| Story Points | 2 (retroactive) |
+| Priority | Should Have |
+| Target sprint | Sprint 1 (inferred) |
 | Status | ✅ Done |
-| Dependencies | HU-APPT-001 |
-| Affected service(s) | `appointment`, `notification` |
+| Dependencies | HU-APPT-001-A |
+| Affected service(s) | `appointment` |
 
 ---
 
@@ -345,11 +473,11 @@ Scenario 3: Successful redemption
 
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
+| Story Points | 3 (retroactive) |
 | Priority | Must Have |
-| Target sprint | Not yet scheduled |
+| Target sprint | Sprint 2 (inferred — see `feat(loyalty)` commit `122b362`, 2026-09-13) |
 | Status | ✅ Done |
-| Dependencies | HU-SHOP-001 |
+| Dependencies | HU-SHOP-001-A |
 | Affected service(s) | `loyalty` |
 
 ---
@@ -384,9 +512,9 @@ Scenario 2: Invalid amount rejected
 
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
+| Story Points | 2 (retroactive) |
 | Priority | Must Have |
-| Target sprint | Not yet scheduled |
+| Target sprint | Sprint 1 (inferred) |
 | Status | ✅ Done |
 | Dependencies | HU-AUTH-003 |
 | Affected service(s) | `finance` |
@@ -423,21 +551,21 @@ Scenario 2: Negative stock rejected
 
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
+| Story Points | 2 (retroactive) |
 | Priority | Should Have |
-| Target sprint | Not yet scheduled |
+| Target sprint | Sprint 1 (inferred) |
 | Status | ✅ Done |
 | Dependencies | HU-AUTH-003 |
 | Affected service(s) | `inventory` |
 
 ---
 
-### HU-NOTIF-001 — Receive appointment notifications {#HU-NOTIF-001}
+### HU-NOTIF-001-A — Notify client on appointment state changes {#HU-NOTIF-001-A}
 
-**Epic:** EP-007
+**Epic:** EP-007 · **Split from:** HU-NOTIF-001
 
 > **As** a `CLIENT`
-> **I want** to receive a notification when my appointment is booked, confirmed, cancelled, or about to happen
+> **I want** to receive a notification when my appointment is booked, confirmed, or cancelled
 > **so that** I don't have to check the app constantly to know my appointment status
 
 **Acceptance Criteria:**
@@ -448,40 +576,71 @@ Scenario 1: Notification on state change
   When the state change happens
   Then an in-app notification is persisted for me, regardless of whether FCM push delivery succeeds
 
-Scenario 2: Day-before reminder
-  Given I have a CONFIRMED appointment for tomorrow
-  When the daily 18:00 reminder job runs
-  Then I receive a REMINDER notification
-
-Scenario 3 (known gap, not yet implemented): Completion notification
+Scenario 2 (known gap, not yet implemented): Completion notification
   Given my appointment is marked COMPLETED
   When the status changes
-  Then — as of this review, no notification is sent (see 02-domain/domain-events.md)
+  Then — as of this review, no notification is sent (see 02-domain/domain-events.md, traceability-matrix.md FR-022)
 ```
 
 **Technical notes:**
 
 **Responsible service(s):** `com.barbersaas.notification`, triggered from `com.barbersaas.appointment`
-**Endpoint(s) implemented:** N/A (triggered server-side, not a client-called endpoint); `GET /api/notifications` to read them
+**Endpoint(s) implemented:** N/A (triggered server-side); `GET /api/notifications` to read them
 **Required permissions:** `CLIENT` (to read own notifications)
 
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
+| Split from | HU-NOTIF-001 |
+| Story Points | 3 (retroactive) |
 | Priority | Must Have |
-| Target sprint | Not yet scheduled |
-| Status | ✅ Done (booking/confirm/cancel/reminder) — 🔴 gap on completion, see AC3 |
-| Dependencies | HU-APPT-001 |
+| Target sprint | Sprint 1 (inferred) |
+| Status | ✅ Done (booking/confirm/cancel) — 🔴 gap on completion, see Scenario 2 |
+| Dependencies | HU-APPT-001-A |
 | Affected service(s) | `notification`, `appointment` |
 
 ---
 
-### HU-SADMIN-001 — Manage barbershop accounts and subscription plans {#HU-SADMIN-001}
+### HU-NOTIF-001-B — Send a day-before appointment reminder {#HU-NOTIF-001-B}
 
-**Epic:** EP-008
+**Epic:** EP-007 · **Split from:** HU-NOTIF-001
+
+> **As** a `CLIENT`
+> **I want** to receive a reminder the day before my appointment
+> **so that** I don't forget it
+
+**Acceptance Criteria:**
+
+```gherkin
+Scenario 1: Day-before reminder
+  Given I have a CONFIRMED appointment for tomorrow
+  When the daily 18:00 reminder job runs
+  Then I receive a REMINDER notification
+```
+
+**Technical notes:**
+
+**Responsible service(s):** `com.barbersaas.notification`, triggered from `com.barbersaas.appointment`
+**Endpoint(s) implemented:** scheduled job (daily 18:00)
+**Required permissions:** N/A (system job)
+
+| Field | Value |
+|-------|-------|
+| Split from | HU-NOTIF-001 |
+| Story Points | 2 (retroactive) |
+| Priority | Must Have |
+| Target sprint | Sprint 1 (inferred) |
+| Status | ✅ Done |
+| Dependencies | HU-APPT-001-A |
+| Affected service(s) | `notification`, `appointment` |
+
+---
+
+### HU-SADMIN-001-A — View barbershops and manage subscription/trial status {#HU-SADMIN-001-A}
+
+**Epic:** EP-008 · **Split from:** HU-SADMIN-001
 
 > **As** a `SUPER_ADMIN`
-> **I want** to view all registered barbershops and manage their subscription/trial status
+> **I want** to view all registered barbershops and manually transition their subscription/trial status
 > **so that** I can operate the BarberSaaS business (billing, support, account lifecycle) across every tenant
 
 **Acceptance Criteria:**
@@ -496,11 +655,6 @@ Scenario 2: Only Super Admin can change billing status
   Given a non-SUPER_ADMIN user
   When they attempt to change a barbershop's status
   Then the system rejects it
-
-Scenario 3 (known gap, not yet implemented): Automatic trial expiration
-  Given a barbershop's 60-day trial reaches its expiration date without conversion
-  When the expiration date passes
-  Then — as of this review — there is no automatic transition to SUSPENDED (see 01-context/scope.md, feature F-14, "in progress")
 ```
 
 **Technical notes:**
@@ -511,12 +665,53 @@ Scenario 3 (known gap, not yet implemented): Automatic trial expiration
 
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
+| Split from | HU-SADMIN-001 |
+| Story Points | 3 (retroactive) |
 | Priority | Must Have |
-| Target sprint | Not yet scheduled |
-| Status | ✅ Done (manual transitions) — 🔴 gap on automatic expiration, see AC3 |
+| Target sprint | Sprint 1 (inferred) |
+| Status | ✅ Done |
 | Dependencies | HU-AUTH-003 |
 | Affected service(s) | `barbershop`, `plan`, `dashboard` |
+
+---
+
+### HU-SADMIN-001-B — Automatically expire a barbershop's trial {#HU-SADMIN-001-B}
+
+**Epic:** EP-008 · **Split from:** HU-SADMIN-001
+
+> **As** the BarberSaaS platform
+> **I want** to automatically transition a barbershop from TRIAL to SUSPENDED when its 60-day trial expires without conversion
+> **so that** unpaid tenants lose access without requiring a Super Admin to check manually every day
+
+**Acceptance Criteria:**
+
+```gherkin
+Scenario 1 (not yet implemented): Automatic trial expiration
+  Given a barbershop's 60-day trial reaches its expiration date without conversion
+  When the expiration date passes
+  Then — as of this review — there is no automatic transition to SUSPENDED
+  (see 01-context/scope.md, feature F-14, "in progress")
+```
+
+**Technical notes:**
+
+**Responsible service(s):** `com.barbersaas.barbershop` (planned: a scheduled job analogous to `AppointmentReminderJob`)
+**Endpoint(s) implemented:** None yet
+**Required permissions:** N/A (system job, planned)
+
+> This is real, currently-planned MVP work (F-14, "in progress" per `01-context/scope.md`
+> and `04-requirements/traceability-matrix.md` FR-026) — **it is not MVP2 scope.** Do not
+> confuse it with `03-product/mvp2-backlog.md`.
+
+| Field | Value |
+|-------|-------|
+| Split from | HU-SADMIN-001 |
+| Story Points | 3 (proposed — pending real estimation, not retroactive since it isn't built yet) |
+| Priority | Must Have |
+| Target sprint | Not yet scheduled |
+| Status | 🔴 Not implemented |
+| Dependencies | HU-SADMIN-001-A |
+| Affected service(s) | `barbershop` |
 
 ---
 
@@ -549,14 +744,17 @@ Scenario 2: Cross-tenant access rejected
 **Endpoint(s) implemented:** N/A — enforced as a filter + service-layer pattern across all endpoints, not a single endpoint
 **Required permissions:** N/A (applies regardless of role)
 
-> This HU is the foundation every other HU in this backlog depends on. See the
-> multi-tenancy rule in each repo's `CLAUDE.md` and `00-governance/security-policy.md`.
+> This HU is the foundation every other HU in this backlog depends on. Deliberately kept
+> unsplit despite touching every module — splitting a single cross-cutting security
+> invariant into per-module pieces would fragment something that must be verified as one
+> whole. See the multi-tenancy rule in each repo's `CLAUDE.md` and
+> `00-governance/security-policy.md`.
 
 | Field | Value |
 |-------|-------|
-| Story Points | Not yet estimated |
+| Story Points | 5 (retroactive) |
 | Priority | Must Have |
-| Target sprint | Not yet scheduled |
+| Target sprint | Sprint 1 (inferred) |
 | Status | ✅ Done |
 | Dependencies | None (foundational) |
 | Affected service(s) | `security`, all tenant-scoped modules |
@@ -576,8 +774,9 @@ Each AC must be verifiable manually or automatable as a test — every AC above 
 documented invariant (`02-domain/entities-and-rules.md`) or a verified code path.
 
 ### 4. One HU = one unit of value
-The HUs above are epic-sized on purpose (see "Backlog status" note). Split each into
-smaller HUs during refinement before scheduling into a sprint.
+As of 2026-09-27 (SPEC-008), the backlog above is already split to sprint-ready
+granularity. When adding a new HU, keep it small enough to fit in one sprint from the
+start — do not create another epic-sized HU that needs splitting later.
 
 ---
 
@@ -587,3 +786,6 @@ smaller HUs during refinement before scheduling into a sprint.
 - Traceability to tests and services → `04-requirements/traceability-matrix.md`
 - Epic-level backlog → `03-product/product-backlog.md`
 - Full HU template with DoD checklist → `04-requirements/_template-hu.md`
+- Sprint numbering and dates → `15-project-control/sprint-status.md`
+- Story map → `03-product/story-map.md`
+- MVP2 backlog (Phase 3+ items, out of current scope) → `03-product/mvp2-backlog.md`
