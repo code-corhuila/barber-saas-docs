@@ -71,8 +71,10 @@ assuming it.
 
 ## Stack
 
-**Target services** (ADR-005): Java 21 · Spring Boot 3.5 · Maven, three modules per service
-(`<domain>-core` with no framework, `<domain>-adapters`, `<domain>-app`) — see
+**Target services** (ADR-012): Java 21 · Spring Boot 3.5 · Maven, three modules per service
+(`<domain>-core` with no framework, `<domain>-adapters`, `<domain>-app`) for eight services;
+Python 3.12 (FastAPI for `notifications-api`, standard library for `worker`) with
+`src/<service>/{domain,application,adapter}` and an `import-linter` contract — see
 `05-architecture/hexagonal-architecture.md`. PostgreSQL ×7 and MongoDB for notifications
 (ADR-006), Liquibase in every `-db` (ADR-007). Mobile: React Native (Expo) with React 19
 (ADR-008, proposed).
@@ -116,7 +118,8 @@ does not count as evidence.
 npx @redocly/cli lint 07-api/contracts/openapi/<service>.yaml
 
 # Service code (in the -api repositories)
-mvn -B verify
+mvn -B verify                  # Java services
+pytest && lint-imports         # Python services (notifications-api, worker)
 
 # Always
 git status && git log --oneline -5 && git diff --stat main...HEAD

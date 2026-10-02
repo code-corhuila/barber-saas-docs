@@ -8,7 +8,7 @@
 | ID | Name | Level | File | Derived from | Updated |
 |---|---|---|---|---|---|
 | C4-01 | System context | L1 | [`c4/c1-system-context.md`](c4/c1-system-context.md) | `05-architecture/overview.md` §2 · `07-api/authentication.md` | 2026-09-30 |
-| C4-02 | Containers | L2 | [`c4/c2-containers.md`](c4/c2-containers.md) | `05-architecture/overview.md` §3–4 · `deployment.md` · ADR-004/006/009 · Annex J | 2026-10-02 |
+| C4-02 | Containers | L2 | [`c4/c2-containers.md`](c4/c2-containers.md) | `05-architecture/overview.md` §3–4 · `deployment.md` · ADR-004/006/009/012 · Annex J | 2026-10-02 |
 | C4-03 | appointment-api components | L3 | [`c4/c3-appointment-api.md`](c4/c3-appointment-api.md) | `05-architecture/hexagonal-architecture.md` | 2026-09-30 |
 
 ## Behavior — UML
@@ -48,7 +48,7 @@ the most specific source and flag the point; none is resolved here.
 | D-3 | SEQ-03 | `domain-events.md` still describes the prototype (in-process calls, income registered in finance on completion); finance-inventory's contract declares no consumer of `AppointmentCompleted` | `02-domain/domain-events.md` · `finance-inventory-service.yaml` |
 | D-4 | C4-02, SEQ-03 | Event transport between outboxes and consumers is undecided | `05-architecture/overview.md` AT-004 |
 | D-5 | C4-02, ERD-01…09 | Annex J (2026-10-01) replaces norm 7.1: one instance per engine in the infrastructure, one schema per domain, `<domain>_app` users, a changelog table per `-db`, and `-db` repositories without an instance or volume. The diagrams follow Annex J; these documents still describe one instance per domain | ADR-006 · `05-architecture/deployment.md` §5 · `06-data/models.md` §1 |
-| D-6 | C4-02 | ADR-005 (*Accepted*) writes all ten services in Java 21; Annex J J.1.2 requires at least two backend languages (Go, Java, Python or C#) | ADR-005 |
+| D-6 | C4-02 | **Resolved by ADR-012:** ADR-005 wrote all ten services in Java 21, against Annex J J.1.2 (two or more languages); ADR-012 keeps Java for eight services and uses Python for `notifications-api` and `worker`, as C4-02 now shows | ADR-005 (superseded) · ADR-012 |
 | D-7 | C4-02 | Annex J J.1.2 requires one `<abbr>-<domain>-portal` per domain, built with React and Angular; our domain interfaces are `-app` repositories (mobile) and ADR-008 is *Proposed*, awaiting the teacher | ADR-008 · `09-microservices/service-catalog.md` |
 | D-8 | C4-02 | Annex J requires `barber-saas-infra-mongo` (it does not exist) and recommends renaming `barber-saas-infra` to `barber-saas-infra-postgres`; both are done by the teacher on request through an issue in this repository (J.8.3) | `05-architecture/deployment.md` · `09-microservices/service-catalog.md` |
 
