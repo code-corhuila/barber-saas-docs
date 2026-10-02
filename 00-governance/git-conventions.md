@@ -119,11 +119,14 @@ Format: `<prefix>/<description-in-kebab-case>`, using lowercase letters, digits 
 
 | Into | From | Method | Why |
 |---|---|---|---|
-| `develop` | `feat/` `fix/` `chore/` | **Squash and merge** | one commit per story: that is the sha re-applied later with `-x` |
+| `develop` | `feat/` `fix/` `chore/` | **Rebase and merge** | every small commit of the story stays in the history (norm 8); each one is re-applied later with `-x` |
 | `qa` | `qa/…` | **Rebase and merge** | keeps each re-applied commit with its `-x` trail and creates no merge commit |
 | `main` (code) | `release/…`, `hotfix/…` | **Rebase and merge** | one commit per story in `main`, each with its trail |
-| `main` (DOCS) | `docs/…` | **Squash and merge** | one commit per documentation change |
+| `main` (DOCS) | `docs/…` | **Rebase and merge** | every small commit of the documentation change stays in the history |
 
+- **One method everywhere: rebase and merge.** The flow is the same in every repository — child
+  branch → pull request → merge — and every small commit lands on the target branch, linear and
+  without merge commits. Squash is not used: it collapses the steps the course evaluates.
 - *Rebase and merge* on GitHub applies the PR commits on top of the target. It does not rewrite any
   published branch.
 - **Never** merge one permanent branch into another.
