@@ -170,12 +170,14 @@ nothing waits forever and nothing fails silently.
 
 ### Resource targets
 
-The full platform is ten JVM services plus two database instances (one per engine). Each `deploy/compose.yml`
+The full platform is eight JVM services, two Python services (`notifications-api`, `worker`,
+ADR-012) and two database instances (one per engine). Each `deploy/compose.yml`
 declares memory limits so a laptop can run it; these are **targets, not measurements**:
 
 | Container | Memory limit (target) |
 |---|---|
 | Each Java service (JVM heap capped inside) | 512 MB |
+| Each Python service (`notifications-api`, `worker`) | 256 MB |
 | PostgreSQL (single instance, seven schemas) | 512 MB |
 | MongoDB (notifications) | 512 MB |
 | Gateway, collector, Prometheus, Grafana | 128–256 MB each |
