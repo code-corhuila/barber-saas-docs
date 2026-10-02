@@ -12,16 +12,19 @@
 
 ## 1. Deployment model
 
-- **Unit of deployment:** one container per service and one per database instance.
+- **Unit of deployment:** one container per service and **one database instance per engine**
+  (PostgreSQL and MongoDB), per environment (ADR-011, Annex J).
 - **Orchestration:** Docker Compose. Every runnable repository (`-db`, `-api`, `-worker`,
   `-workflow`, `-api-gateway`, `-front`) ships its own `deploy/compose.yml`;
-  `barber-saas-infra` only **composes** them with `include` (norm 5.9.1, annex G).
+  `barber-saas-infra` **composes** them with `include` and also defines the single PostgreSQL
+  instance; `barber-saas-infra-mongo` defines the MongoDB one (Annex J J.2, J.7).
 - **No Kubernetes.** Not required by the norm and out of the team's capacity (ADR-004 risks).
 - The repositories are cloned as siblings; `-infra` is the folder the platform is started from.
 
 ```
 workspace/
-  barber-saas-infra/            <- everything starts here
+  barber-saas-infra/            <- everything starts here; PostgreSQL instance
+  barber-saas-infra-mongo/      <- MongoDB instance (to be created by the teacher, J.8.3)
   barber-saas-api-gateway/
   barber-saas-workflow/
   barber-saas-worker/
@@ -41,17 +44,20 @@ workspace/
           │
   ════════╪═════════════════ network: platform (internal) ═════════════════
           │
-          ├── /api/v1/auth ................ identity-auth-api:8080 ──► identity-auth-db:5432
-          ├── /api/v1/barbershops|services|barbers barbershop-api:8080 ──► barbershop-db:5432
-          ├── /api/v1/appointments ........ appointment-api:8080 ───► appointment-db:5432
+          ├── /api/v1/auth ................ identity-auth-api:8080 ──► postgres:5432 schema identity_auth
+          ├── /api/v1/barbershops|services|barbers barbershop-api:8080 ──► postgres:5432 schema barbershop
+          ├── /api/v1/appointments ........ appointment-api:8080 ───► postgres:5432 schema appointment
           ├── /api/v1/barber-schedules|schedule-exceptions|availability
-          │                                 schedule-api:8080 ──────► schedule-db:5432
-          ├── /api/v1/loyalty ............. loyalty-api:8080 ───────► loyalty-db:5432
+          │                                 schedule-api:8080 ──────► postgres:5432 schema schedule
+          ├── /api/v1/loyalty ............. loyalty-api:8080 ───────► postgres:5432 schema loyalty
           ├── /api/v1/notifications|device-tokens
-          │                                 notifications-api:8080 ─► notifications-db:27017 (rs0)
-          ├── /api/v1/finance|inventory ... finance-inventory-api:8080 ► finance-inventory-db:5432
-          ├── /api/v1/plans|platform ...... platform-admin-api:8080 ► platform-admin-db:5432
-          └── /api/v1/sagas ............... workflow:8080 ──────────► saga store, PostgreSQL (ADR-009, proposed)
+          │                                 notifications-api:8080 ─► mongo:27017 (rs0) database notifications
+          ├── /api/v1/finance|inventory ... finance-inventory-api:8080 ► postgres:5432 schema finance_inventory
+          ├── /api/v1/plans|platform ...... platform-admin-api:8080 ► postgres:5432 schema platform_admin
+          └── /api/v1/sagas ............... workflow:8080 ──────────► postgres:5432 schema workflow (ADR-009, proposed)
+
+      postgres = the single PostgreSQL instance (barber-saas-infra) · mongo = the single
+      MongoDB instance (barber-saas-infra-mongo) · each service logs in as <domain>_app
 
       worker (health only) ── service token ──► domain APIs
       otel-collector · prometheus  ◄── logs, metrics, traces from every container
@@ -66,7 +72,7 @@ workspace/
 | Shared network | `platform`, external, created by `-infra/scripts/up.sh` | Annex G |
 | Published to the host | **Only** `api-gateway` (`8000`) and Grafana | Norm 5.6.1 |
 | Domain services | `expose: 8080`, never `ports` | Annex G |
-| Addresses inside the network | Service name, never `localhost` (`appointment-db:5432`) | Annex G |
+| Addresses inside the network | Service name, never `localhost` (`postgres:5432`, `mongo:27017`) | Annex G, Annex J J.7 |
 | Gateway → service | `proxy_pass` through a variable, resolved on every request (`resolver 127.0.0.11`) | Norm 5.6.3, annex F |
 | CORS | Only the front's origins; headers `Authorization`, `Content-Type`, `Idempotency-Key`, `X-Correlation-Id`; exposes `X-Correlation-Id`, `Location` | Norm 5.6.4 |
 
@@ -86,22 +92,32 @@ move between them by cherry-pick with `-x`, never by merge (norm 10).
 | **qa** | `qa` | `qa/` PRs (cherry-picks from `develop`) | Issued by identity-auth, stored as environment secrets | Synthetic |
 | **main** | `main` | `release/` and `hotfix/` PRs | Issued by identity-auth, stored as environment secrets | Real |
 
-Each environment has its own `-infra/env/.env.<environment>.example` with variable names and
-placeholders only. Where `qa` and `main` are hosted is **not decided** (see §9).
+Each infrastructure repository has one variables file per environment — `env/dev.env.example`,
+`env/qa.env.example`, `env/main.env.example`, names and placeholders only — and each sets its own
+`COMPOSE_PROJECT_NAME` (`barber-saas-dev`, `-qa`, `-main`), so every environment has its own
+database container and volume (Annex J J.5.1). Where `qa` and `main` are hosted is **not decided** (see §9).
 
 ---
 
 ## 5. Databases and migrations
 
-- Eight instances, one per domain, each with its own volume (norm 7.1): PostgreSQL for seven,
-  MongoDB single-node replica set for `notifications` (ADR-006).
-- Each `-db` ships, next to its instance, a **migration runner** `<domain>-db-migrate`
-  (Liquibase with a pinned image version, ADR-007) with `profiles: [tooling]`: it does not
-  start with `up`, it waits for its database to be healthy, and it mounts the `-db`
-  repository read-only.
-- Migrations run from `-infra`, once per `-db`:
-  `docker compose --env-file .env run --rm appointment-db-migrate`. Running it again must
-  apply zero changes.
+- **One instance per engine, one volume each** (ADR-011, Annex J): PostgreSQL 16 in
+  `barber-saas-infra` with seven schemas, MongoDB single-node replica set in
+  `barber-saas-infra-mongo` with the `notifications` database (engines: ADR-006). The
+  infrastructure also creates the extensions and the `<domain>_app` users in an idempotent
+  `postgres/init/01-instance.sh`; a new domain's user is added there and run once by hand in
+  every existing environment (J.5.5).
+- Each `-db` ships **only** a **migration runner** `<domain>-db-migrate` — no database service,
+  no volume — (Liquibase with a pinned image version, ADR-007) with `profiles: [tooling]`: it
+  does not start with `up`, it targets the shared instance, it mounts the `-db` repository
+  read-only, and it uses its own changelog tables `databasechangelog_<domain>` and
+  `databasechangeloglock_<domain>` (J.6).
+- Migrations run from `-infra`, once per `-db`, after the instance is up:
+  `docker compose --env-file env/dev.env up -d --wait postgres`, then
+  `docker compose --env-file env/dev.env run --rm appointment-db-migrate`. Running it again
+  must apply zero changes.
+- **Volumes are history:** in `qa` and `main`, never `docker compose down -v`, and back up the
+  database before migrating (J.5.4).
 - **Order in `qa` and `main`:** migrate the database **before** deploying the `-api` version
   that needs it. A breaking change (rename, drop or retype a column) ships in two releases,
   expand then contract (annex A).
@@ -115,7 +131,7 @@ placeholders only. Where `qa` and `main` are hosted is **not decided** (see §9)
 | `JWT_PUBLIC_KEY` (RS256, read by every service) | `dev-keys.sh` writes it to `.env` | Published by identity-auth, environment secret |
 | JWT private key | `keys/` in `-infra`, ignored by git | Only inside identity-auth |
 | `SERVICE_TOKEN` (worker, workflow) | `dev-keys.sh` | Issued by identity-auth |
-| DB credentials (`<DOMAIN>_DB_USER`, `<DOMAIN>_DB_PASSWORD`) | `.env` | Environment secrets |
+| DB credentials: administrator (`PG_ADMIN_USER`, `PG_ADMIN_PASSWORD`, infrastructure only) and one `<DOMAIN>_APP_PASSWORD` per domain user | `env/dev.env` | Environment secrets |
 | Firebase and SMTP credentials | `.env` | Environment secrets |
 
 `.env`, `keys/` and `*.pem` are ignored by git; a password that is missing makes the command
@@ -141,10 +157,10 @@ The same `X-Correlation-Id` must appear in the logs of every service a request t
 
 ```bash
 cd barber-saas-infra
-cp env/.env.develop.example .env           # fill in every *_DB_PASSWORD
+cp env/dev.env.example env/dev.env         # fill in PG_ADMIN_PASSWORD and every *_APP_PASSWORD
 ./scripts/dev-keys.sh                      # RSA pair + JWT_PUBLIC_KEY + SERVICE_TOKEN
 ./scripts/up.sh                            # checks .env, creates 'platform', starts everything
-docker compose --env-file .env run --rm identity-auth-db-migrate   # repeat for each -db
+docker compose --env-file env/dev.env run --rm identity-auth-db-migrate   # repeat for each -db
 curl -H "Authorization: Bearer $(./scripts/dev-token.sh alice)" \
      http://localhost:8000/api/v1/appointments
 ```
@@ -154,13 +170,13 @@ nothing waits forever and nothing fails silently.
 
 ### Resource targets
 
-The full platform is ten JVM services plus eight database instances. Each `deploy/compose.yml`
+The full platform is ten JVM services plus two database instances (one per engine). Each `deploy/compose.yml`
 declares memory limits so a laptop can run it; these are **targets, not measurements**:
 
 | Container | Memory limit (target) |
 |---|---|
 | Each Java service (JVM heap capped inside) | 512 MB |
-| Each PostgreSQL instance | 256 MB |
+| PostgreSQL (single instance, seven schemas) | 512 MB |
 | MongoDB (notifications) | 512 MB |
 | Gateway, collector, Prometheus, Grafana | 128–256 MB each |
 
@@ -174,7 +190,7 @@ identity-auth, barbershop, schedule, appointment and the gateway).
 | ID | Question | Blocks |
 |---|---|---|
 | DEP-01 | Hosting for `qa` and `main` (the prototype used Railway; nothing chosen for the polyrepo) | Release evidence |
-| DEP-02 | Saga state instance owned by `-workflow` or a separate `workflow-db` repository | ADR-009 (awaiting teacher) |
+| DEP-02 | Saga state as a `workflow` schema in the shared PostgreSQL instance, migrated by `-workflow` or by a separate `workflow-db` repository (never a separate instance, ADR-011) | ADR-009 (awaiting teacher) |
 | DEP-03 | Event transport between services: message broker or worker-polled outbox | AT-004 in `overview.md` |
 
 ---
@@ -189,10 +205,12 @@ branch of the repositories (checked with `git ls-files` on `develop`, `qa` and `
 |---|---|---|
 | `compose.yml` with `include` of every repository, `platform` network | `barber-saas-infra` | §1, §8 |
 | `scripts/up.sh`, `scripts/dev-keys.sh`, `scripts/dev-token.sh` | `barber-saas-infra` | §6, §8 |
-| `env/.env.develop.example`, `env/.env.qa.example`, `env/.env.main.example` | `barber-saas-infra` | §4, §6 |
+| `env/dev.env.example`, `env/qa.env.example`, `env/main.env.example` | `barber-saas-infra`, `barber-saas-infra-mongo` | §4, §6 |
+| PostgreSQL service + volume in `compose.yml`, `postgres/init/01-instance.sh` | `barber-saas-infra` | §5 |
+| MongoDB service + volume, the repository itself | `barber-saas-infra-mongo` (requested from the teacher) | §5 |
 | `observability/otel-collector.yaml`, `observability/prometheus.yml`, Grafana | `barber-saas-infra` | §7 |
 | `deploy/compose.yml` + NGINX config with one routes file per domain | `barber-saas-api-gateway` | §2, §3 |
-| `deploy/compose.yml` with the instance and its `<domain>-db-migrate` runner; Liquibase changelog | each `barber-saas-<domain>-db` (8) | §5 |
+| `deploy/compose.yml` with only its `<domain>-db-migrate` runner (own changelog table); Liquibase changelog | each `barber-saas-<domain>-db` (8) | §5 |
 | `Dockerfile` + `deploy/compose.yml` (`expose: 8080`, memory limit, `GET /health`) | each `barber-saas-<domain>-api` (8), `-workflow`, `-worker` | §3, §7, §8 |
 | `.gitignore` covering `.env`, `keys/`, `*.pem` | every runnable repository | §6 |
 | Hosting for `qa` and `main` | — | DEP-01 |
@@ -209,8 +227,9 @@ they do not appear in the compose file.
 
 - [ ] With the repositories cloned as siblings, `up.sh` starts the whole platform
 - [ ] Only the gateway and Grafana publish ports to the host
-- [ ] Each `-db` starts its own instance; its migration applies, and a second run applies nothing
-- [ ] `-infra` contains no migration and no credential in any `compose.yml`
+- [ ] Each `-db` migrates its schema into the shared instance; a second run applies nothing, and no `-db` defines a database service or volume
+- [ ] Annex J's query (J.10) shows each `<domain>_app` writing only to its own schema
+- [ ] `-infra` contains no domain migration (only `01-instance.sh`) and no credential in any `compose.yml`
 - [ ] A resource is created and listed through the gateway with a token from `dev-token.sh`
 - [ ] worker and workflow authenticate with `SERVICE_TOKEN`
 - [ ] One `X-Correlation-Id` appears in the logs of every service a request touched
