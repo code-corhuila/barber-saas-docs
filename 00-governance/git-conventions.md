@@ -12,7 +12,7 @@
 | Category | Repositories | Branch regime |
 |---|---|---|
 | **A — Prototype** | `code-corhuila/barber-saas` | No restrictions (norma 3.1). Not evaluated after the first cut (norma 3.2). Team exception, decided 2026-09-14: work happens directly on `develop`, no new branch per task. **This exception applies to this repository only.** |
-| **B — Documentation** | `code-corhuila/barber-saas-docs` | One permanent branch: `main`. Every change goes through a child branch `docs/NNN-slug` → Pull Request → 1 approval from `ariel5253` → squash merge. **No direct commit or push to `main`, ever.** |
+| **B — Documentation** | `code-corhuila/barber-saas-docs` | One permanent branch: `main`. Every change goes through a child branch `docs/NNN-slug` → Pull Request → 1 approval from `ariel5253` → rebase and merge. **No direct commit or push to `main`, ever.** |
 | **C — Code** | the 29 `code-corhuila/barber-saas-*` repositories | Three permanent branches, `develop`, `qa` and `main`, as described below. |
 
 Branch strategy, promotion and review rules apply to category C. Branch naming, commit format and
