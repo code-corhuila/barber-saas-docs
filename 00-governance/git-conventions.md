@@ -52,6 +52,9 @@ git push -u origin qa/hu-appt-003-walk-in-appointments
 # open PR → qa
 ```
 
+- A story usually arrives in `develop` as several small commits (rebase and merge). Re-apply all of
+  them, in order, in the same `qa/…` branch: `git cherry-pick -x <first-sha>^..<last-sha>` gives each
+  one its own trail.
 - `-x` is mandatory. The line `(cherry picked from commit <sha>)` is the only link between the two
   versions of a change. A commit in `qa` or `main` without it does not count as progress.
 - The cited `<sha>` must exist in the source branch. A trail that points to a non-existent commit
