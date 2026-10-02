@@ -30,9 +30,10 @@ ADRs document important architectural decisions. Each file = one decision.
 | [ADR-005](records/ADR-005-language-per-service.md) | Language per Service: Java 21 and Spring Boot 3.5 | Accepted | 2026-09-28 |
 | [ADR-006](records/ADR-006-database-engine-per-domain.md) | Database Engine per Domain: PostgreSQL ×7, MongoDB for notifications | Accepted | 2026-09-28 |
 | [ADR-007](records/ADR-007-migration-tool-per-domain.md) | Migration Tool per Domain: Liquibase | Accepted | 2026-09-28 |
-| [ADR-008](records/ADR-008-interface-framework.md) | Interface Framework: React (React Native for mobile) | Proposed | 2026-09-28 |
+| [ADR-008](records/ADR-008-interface-framework.md) | Interface Framework: React (React Native for mobile) | Superseded by ADR-013 | 2026-09-28 |
 | [ADR-009](records/ADR-009-saga-state-store.md) | Saga State Store: PostgreSQL owned by the workflow | Proposed | 2026-09-28 |
 | [ADR-010](records/ADR-010-data-conventions-per-domain.md) | Data Conventions per Domain: UUID ids, money in cents, no cross-domain FK | Accepted | 2026-09-28 |
+| [ADR-013](records/ADR-013-hybrid-mobile-interface.md) | Interface: one hybrid mobile app (Ionic + Capacitor), Angular shell, four Angular and four React domain apps | Accepted | 2026-10-02 |
 
 ## Decisions the course norm requires
 
@@ -42,7 +43,7 @@ ADRs document important architectural decisions. Each file = one decision.
 | Language of each service (4.2.2) | ADR-005 | Accepted |
 | Database engine of each domain (4.2.2) | ADR-006 | Accepted |
 | Migration tool of each domain (4.2.2) | ADR-007 | Accepted |
-| Interface framework (4.2.2) | ADR-008 | Proposed — awaiting the teacher |
+| Interface framework (4.2.2; Annex J: React and Angular) | ADR-013 (supersedes ADR-008) | Accepted |
 | Where saga state is persisted (5.8.4) | ADR-009 | Proposed — awaiting the teacher |
 | Identifier type and money representation (5.3.5) | ADR-010 — UUID for every entity, `bigint` cents | Accepted |
 
