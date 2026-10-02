@@ -381,7 +381,11 @@ async function withRetry<T>(
 
 #### Database per Service
 
-**Rule:** Each microservice has its own database. No service directly accesses another service's database.
+**Rule:** Each microservice owns its data. No service directly writes to another service's data.
+
+> **In BarberSaaS (ADR-011, Annex J):** "its own database" means its own **schema** in the single
+> instance of its engine, reached with its own `<domain>_app` user. A direct read of another
+> domain's schema is allowed only with the owner's grant and a technical-debt ADR; today there is none.
 
 ```
 ✓ Correct:

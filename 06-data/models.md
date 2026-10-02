@@ -1,7 +1,8 @@
 # Data Models — BarberSaaS
 
-> Target data model: **one database per domain** (ADR-004), PostgreSQL for seven domains and
-> MongoDB for notifications (ADR-006), under the conventions of
+> Target data model: **one schema per domain** (ADR-004) inside **one instance per engine**
+> (ADR-011, course norm Annex J), PostgreSQL for seven domains and MongoDB for notifications
+> (ADR-006), under the conventions of
 > [ADR-010](../05-architecture/decisions/records/ADR-010-data-conventions-per-domain.md).
 > Every table below backs a resource of `07-api/contracts/openapi/`: same fields
 > (`camelCase` ↔ `snake_case`), same types, same sets of values.
@@ -32,7 +33,7 @@
 
 ## 1. Ownership map
 
-| Domain | Database (instance) | Engine | Schema | Owns | Contract |
+| Domain | `-db` repository | Engine | Schema (shared instance) | Owns | Contract |
 |---|---|---|---|---|---|
 | Identity & Auth | `identity-auth-db` | PostgreSQL | `identity_auth` | `app_user`, `refresh_token`, `password_reset_token` | `auth-service.yaml` |
 | Barbershop | `barbershop-db` | PostgreSQL | `barbershop` | `barbershop`, `service`, `barber_profile`, `barber_specialty` | `barbershop-service.yaml` |

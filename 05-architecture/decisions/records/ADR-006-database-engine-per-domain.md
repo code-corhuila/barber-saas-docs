@@ -2,8 +2,13 @@
 
 - **ID:** ADR-006
 - **Date:** 2026-09-28
-- **Status:** Accepted
+- **Status:** Accepted — instance topology superseded by ADR-011 (2026-10-02)
 - **Authors:** Carlos Mauricio Leal Medina, Daniel Felipe Cerquera Idrobo, Juan Pablo Borrero Morales, Carolay Arraut Heredia
+
+> **Partially superseded (2026-10-02).** The engine choice below stays in force. The topology —
+> "each domain runs its own instance, defined in its `-db` repository" and "eight database instances
+> in development" — was replaced by [ADR-011](ADR-011-single-instance-per-engine.md): one instance
+> per engine, one schema per domain (course norm Annex J). The text below is kept as written.
 
 ---
 
