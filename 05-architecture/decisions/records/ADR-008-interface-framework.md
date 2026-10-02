@@ -2,8 +2,13 @@
 
 - **ID:** ADR-008
 - **Date:** 2026-09-28
-- **Status:** Proposed — pending the teacher's answer (see "Open question")
+- **Status:** Superseded by ADR-013 (2026-10-02)
 - **Authors:** Carlos Mauricio Leal Medina, Daniel Felipe Cerquera Idrobo, Juan Pablo Borrero Morales, Carolay Arraut Heredia
+
+> **Superseded (2026-10-02)** by [ADR-013](ADR-013-hybrid-mobile-interface.md): course norm Annex J
+> requires two frameworks, so the interface becomes one hybrid mobile app (Ionic + Capacitor) with
+> an Angular shell, four Ionic Angular and four Ionic React domain apps. The text below is kept as
+> written.
 
 ---
 
