@@ -2,8 +2,12 @@
 
 - **ID:** ADR-005
 - **Date:** 2026-09-28
-- **Status:** Accepted
+- **Status:** Superseded by ADR-012 (2026-10-02)
 - **Authors:** Carlos Mauricio Leal Medina, Daniel Felipe Cerquera Idrobo, Juan Pablo Borrero Morales, Carolay Arraut Heredia
+
+> **Superseded (2026-10-02)** by [ADR-012](ADR-012-two-backend-languages.md): course norm Annex J
+> requires at least two backend languages, so `notifications-api` and `worker` move to Python and
+> the other eight services stay in Java 21. The text below is kept as written.
 
 ---
 
