@@ -166,8 +166,10 @@ must tell others writes the event to an outbox table in the same transaction (no
 processes that must be undone on failure run as sagas in `-workflow`.
 
 ### P5: Hexagonal services
-Each service is a Maven build with `-core` (no Spring dependency), `-adapters` and `-app`
-(ADR-005). A framework annotation in the domain does not compile (norm 5.3.3).
+Eight services are Maven builds with `-core` (no Spring dependency), `-adapters` and `-app`: a
+framework annotation in the domain does not compile (norm 5.3.3). `notifications-api` and
+`worker` are Python, with the same layers under `src/<service>/` and an import contract checked
+in CI instead of the compiler (ADR-012; Annex J requires two or more backend languages).
 
 ### P6: English code, Spanish UX
 Code, contracts and documentation are in English (ADR-001). User-facing text (messages,

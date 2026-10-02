@@ -6,8 +6,10 @@
 >
 > **In BarberSaaS this is a rule, not reference material.** Every service of the ADR-004
 > topology — the eight `barber-saas-<domain>-api`, `-worker` and `-workflow` — is built this way
-> (course norm 5.3.1–5.3.3, annex C), in Java 21 / Spring Boot 3.5 with three Maven modules
-> ([ADR-005](decisions/records/ADR-005-language-per-service.md)). The framework's generic
+> (course norm 5.3.1–5.3.3, annex C). Eight services are Java 21 / Spring Boot 3.5 with three
+> Maven modules; `notifications-api` and `worker` are Python 3.12
+> ([ADR-012](decisions/records/ADR-012-two-backend-languages.md)), with the same layers under
+> `src/<service>/` (see "Python services" below). The framework's generic
 > [`_stacks/java-spring.md`](../_stacks/java-spring.md) shows a single-module layout; where it
 > differs, the three-module layout of this document and annex C wins.
 
@@ -164,6 +166,29 @@ translates its violation into the domain's `BUSINESS_RULE_VIOLATION`.
 
 ---
 
+## Python services — `notifications-api` and `worker`
+
+Same layers, same contract, different folders (annex C, annex D):
+
+| Layer | Java (`appointment-api`) | Python (`notifications-api`) |
+|---|---|---|
+| Domain | `appointment-core/…/domain/model/` | `src/notifications/domain/model/` |
+| Ports in / out | `…/application/port/in/`, `…/port/out/` | `src/notifications/application/port/inbound/`, `…/outbound/` |
+| Use cases | `…/application/usecase/` | `src/notifications/application/usecase/` |
+| HTTP adapter | `appointment-adapters/…/adapter/in/http/` | `src/notifications/adapter/inbound/http/` (FastAPI) |
+| Persistence | `…/adapter/out/persistence/` (JDBC) | `src/notifications/adapter/outbound/persistence/` (`pymongo`) |
+| Composition root | `appointment-app/` | `apps/api/__main__.py` |
+
+The worker follows annex D: `src/worker/` with a scheduler as inbound adapter and HTTP clients
+(`urllib`, standard library) as outbound adapters, started from `apps/worker/__main__.py`.
+
+**What replaces the compiler.** In Java a Spring annotation in `-core` does not compile. In
+Python nothing stops it, so each Python repository runs an `import-linter` contract in CI:
+`domain` imports nothing from the project, `application` imports only `domain`, and neither
+imports FastAPI, `pymongo` or an adapter. A failing contract fails the pull request.
+
+---
+
 ## Testing (annex C)
 
 | Level | Tests | Needs |
@@ -214,7 +239,7 @@ TDD guide: `11-quality/tdd-guide.md`.
 ## References and correlations
 
 - Bounded contexts → `02-domain/domain-map.md`; invariants → `02-domain/entities-and-rules.md`
-- Language and module layout → ADR-005; data conventions → ADR-010
+- Language and module layout → ADR-012 (supersedes ADR-005); data conventions → ADR-010
 - Service catalog and topology → `05-architecture/overview.md`
 - Complementary patterns (Saga, Outbox) → `05-architecture/pattern-guide.md`
 - Course norm 5.3 and annex C → `Normas/C-api-hexagonal.md` (course material)

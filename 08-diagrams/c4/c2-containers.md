@@ -2,7 +2,7 @@
 
 > **Level:** C4 L2 · **Derived from:** `05-architecture/overview.md` §3–4,
 > `05-architecture/deployment.md`, course norm **Annex J** (2026-10-01) · **Decisions:** ADR-004
-> (topology), ADR-006 (engine per domain), ADR-009 (saga store, proposed)
+> (topology), ADR-006 (engine per domain), ADR-009 (saga store, proposed), ADR-012 (languages)
 
 The deployable units of the 29 repositories: one front, one gateway, eight domain services, the
 workflow and the worker, and **one database instance per engine**. Annex J replaces norm 7.1:
@@ -18,19 +18,19 @@ flowchart TB
   subgraph platform["Network: platform (internal)"]
     gw["barber-saas-api-gateway<br/>NGINX · only published port :8000"]
 
-    subgraph domains["Domain services · :8080 each · language per ADR-005, under review (Annex J: two or more)"]
+    subgraph domains["Domain services · :8080 each · Java 21 / Spring Boot, except notifications-api (Python) — ADR-012"]
       auth["identity-auth-api"]
       shop["barbershop-api"]
       appt["appointment-api"]
       sched["schedule-api"]
       loy["loyalty-api"]
-      notif["notifications-api"]
+      notif["notifications-api<br/>Python · FastAPI"]
       fin["finance-inventory-api"]
       padm["platform-admin-api"]
     end
 
-    wf["barber-saas-workflow<br/>cross-domain sagas"]
-    wk["barber-saas-worker<br/>scheduled jobs · outbox relay"]
+    wf["barber-saas-workflow<br/>cross-domain sagas · Java"]
+    wk["barber-saas-worker<br/>scheduled jobs · outbox relay · Python"]
 
     subgraph pg["barber-saas-infra · PostgreSQL 16 — single instance, one volume<br/>(rename to -infra-postgres requested to the teacher, Annex J J.8)"]
       authdb[("schema identity_auth<br/>user identity_auth_app")]
